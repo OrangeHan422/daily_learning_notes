@@ -717,4 +717,211 @@ using INT = int;
 typedef int INT;
 ```
 
-别名声明可以被模板化，而typedef则不可以
+当声明一个*函数指针*的时候，别名声明可读性更强
+
+```c++
+//FP是一个指向函数的指针的同义词，它指向的函数带有
+//int和const std::string&形参，不返回任何东西
+typedef void (*FP)(int, const std::string&);    //typedef
+//含义同上
+using FP = void (*)(int, const std::string&);   //别名声明
+```
+
+别名声明可以被模板化，而typedef则不可以。考虑一个链表的别名情形：
+
+```c++
+//使用别名制作模板
+template<typename T>                            //MyAllocList<T>是
+using MyAllocList = std::list<T, MyAlloc<T>>;   //std::list<T, MyAlloc<T>>
+                                                //的同义词
+
+MyAllocList<Widget> lw;                         //用户代码
+
+//使用typedef制作模板
+template<typename T>                            //MyAllocList<T>是
+struct MyAllocList {                            //std::list<T, MyAlloc<T>>
+    typedef std::list<T, MyAlloc<T>> type;      //的同义词  
+};
+
+MyAllocList<Widget>::type lw;                   //用户代码
+```
+
+如果在模板内使用typedef声明一个链表对象，而这个对象又使用了模板形参，此时该对象的类型就称之为*依赖类型*，依赖类型前面必须加上typename：
+
+```c++
+template<typename T>                            //MyAllocList<T>是
+struct MyAllocList {                            //std::list<T, MyAlloc<T>>
+    typedef std::list<T, MyAlloc<T>> type;      //的同义词  
+};
+template<typename T>
+class Widget {                              //Widget<T>含有一个
+private:                                    //MyAllocLIst<T>对象
+    typename MyAllocList<T>::type list;     //作为数据成员
+    …
+}; 
+//MyAllocList<T>::type因为依赖模板参数T，所以称之为依赖类型，依赖类型名前面必须加上typename
+
+//但是使用别名就没必要这么麻烦
+template<typename T> 
+using MyAllocList = std::list<T, MyAlloc<T>>;   //同之前一样
+
+template<typename T> 
+class Widget {
+private:
+    MyAllocList<T> list;                        //没有“typename”
+    …                                           //没有“::type”
+};
+```
+
+在模板元编程中，会遇到这种情况：取模板的类型，然后基于它创建另一种类型（可能是const以及引用的区别），这时候可以使用`<type_traits>`,比如：
+
+```c++
+std::remove_const<T>::type          //从const T中产出T
+std::remove_reference<T>::type      //从T&和T&&中产出T
+std::add_lvalue_reference<T>::type  //从T中产出T&
+```
+
+> 注意类型转换尾部的`::type`。如果你在一个模板内部将他们施加到类型形参上（实际代码中你也总是这么用），你也需要在它们前面加上`typename`
+
+为什么这里标准库也使用typedef而不是using，是因为历史原因。在C++14中，则提供了using的版本，但是完全是另一种模板了，在后缀上加了`_t`,如：
+
+```c++
+std::remove_const<T>::type          //C++11: const T → T 
+std::remove_const_t<T>              //C++14 等价形式
+
+std::remove_reference<T>::type      //C++11: T&/T&& → T 
+std::remove_reference_t<T>          //C++14 等价形式
+
+std::add_lvalue_reference<T>::type  //C++11: T → T& 
+std::add_lvalue_reference_t<T>      //C++14 等价形式
+    
+//如果编译器不支持C++14，可以自定义别名：
+template <class T> 
+using remove_const_t = typename remove_const<T>::type;
+
+template <class T> 
+using remove_reference_t = typename remove_reference<T>::type;
+
+template <class T> 
+using add_lvalue_reference_t =
+  typename add_lvalue_reference<T>::type; 
+```
+
+### 条款10： 有限考虑限域enum而非未限域enum
+
++ 所谓的限域和未限域，在《C++20高级编程》中对应的就是新式的enum class声明和旧式的enum声明
+
+  > 使用新式的声明可以减少命名污染，但是使用相对麻烦，因此可以使用using进行简化。
+  >
+  > 但是使用using简化，会再次导致命名污染，所以尽量将using使用在局部，如switch中
+
++ 新式的声明式强类型的枚举类，而旧式声明则会隐式转换为整形，如：
+
+```c++
+enum Color { black, white, red };       //未限域enum
+
+std::vector<std::size_t>                //func返回x的质因子
+  primeFactors(std::size_t x);
+
+Color c = red;
+…
+
+if (c < 14.5) {                         // Color与double比较 (!)
+    auto factors =                      // 计算一个Color的质因子(!)
+      primeFactors(c);
+    …
+}
+//推荐使用新式声明
+enum class Color { black, white, red }; //Color现在是限域enum
+
+Color c = Color::red;                   //和之前一样，只是
+...                                     //多了一个域修饰符
+
+if (c < 14.5) {                         //错误！不能比较
+                                        //Color和double
+    auto factors =                      //错误！不能向参数为std::size_t
+      primeFactors(c);                  //的函数传递Color参数
+    …
+}
+//对于新式声明，如果确实需要和数值类型进行计算等，可以使用强制类型转化
+if (static_cast<double>(c) < 14.5) {    //奇怪的代码，
+                                        //但是有效
+    auto factors =                                  //有问题，但是
+      primeFactors(static_cast<std::size_t>(c));    //能通过编译
+    …
+}
+```
+
++ 《C++20高级编程》第一章没有提及的另一个好处是：新式声明可以被前置声明（这个问题在工作中遇到过），如：
+
+  ```c++
+  enum Color;         //错误！
+  enum class Color;   //没问题
+  ```
+
+  > 这里存在一个误导，即使旧式的enum也是可以前置声明的。因为编译器总是选择可以存储所有枚举成员的最小的数据类型作为枚举体的基础类型，因此，如果不指明枚举体的基础数据类型，仅有前置声明，编译器会手足无措。对此，可以这么做来实现旧式的前置声明：
+  >
+  > ```c++
+  > enum Color: std::uint8_t;   //非限域enum前向声明
+  >                             //底层类型为
+  >                             //std::uint8_t
+  > ```
+
++ 旧式声明唯一的好处是在涉及到`std::tuple`的时候，可读性会好一些，但是仍推荐新式声明。实例如下：
+
+  ```c++
+  using UserInfo =                //类型别名，参见Item9
+      std::tuple<std::string,     //名字
+                 std::string,     //email地址
+                 std::size_t> ;   //声望
+  //旧式声明
+  enum UserInfoFields { uiName, uiEmail, uiReputation };
+  
+  UserInfo uInfo;                         //同之前一样
+  …
+  auto val = std::get<uiEmail>(uInfo);    //啊，获取用户email字段的值
+  //新式声明
+  enum class UserInfoFields { uiName, uiEmail, uiReputation };
+  
+  UserInfo uInfo;                         //同之前一样
+  …
+  auto val =
+      std::get<static_cast<std::size_t>(UserInfoFields::uiEmail)>
+          (uInfo);
+  //如果该情形出现频繁，可以使用封装一个函数来简化该操作
+  //1、因为std::get是一个模板，需要std::size_t值的模板实参,因为需要在编译器直到这个值，所以封装的函数必须是一个constexpr函数
+  //2、为了泛化性更好，我们的函数希望对于所有的枚举都有效，相对于返回std::size_t，我们更希望模板函数返回的是枚举类的底层类型
+  
+  //对于C++11可以通过std::underlying_type这个type trait获得，对于constexpr我们大多要加上noexcept，因此可以这么写：
+  template<typename E>
+  constexpr typename std::underlying_type<E>::type
+      toUType(E enumerator) noexcept
+  {
+      return
+          static_cast<typename
+                      std::underlying_type<E>::type>(enumerator);
+  }
+  
+  //对于C++14，利用条款9提到的using版本的type trait，可以如此优化
+  template<typename E>                //C++14
+  constexpr std::underlying_type_t<E>
+      toUType(E enumerator) noexcept
+  {
+      return static_cast<std::underlying_type_t<E>>(enumerator);
+  }
+  //由因为C++14允许auto作为函数返回值，因此，可以进一步优化：
+  template<typename E>                //C++14
+  constexpr auto
+      toUType(E enumerator) noexcept
+  {
+      return static_cast<std::underlying_type_t<E>>(enumerator);
+  }
+  
+  
+  //这时候，使用std::get就可以这么写：
+  auto val = std::get<toUType(UserInfoFields::uiEmail)>(uInfo);
+  ```
+
+  > 尽管仍然很长，但是新式声明可以防止隐式转换，同时可以避免命名污染。
+  >
+  > 因此，无论何时，最好使用新式声明
