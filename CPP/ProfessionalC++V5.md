@@ -35,7 +35,7 @@
 
 ##### 1.1.4 变量
 
-+ 推荐使用统一初始化（注意《Effective Mordern C++》中，使用auto和模板编程时的情况），即`T t{}`
++ 推荐使用统一初始化（注意《Effective Modern C++》中，使用auto和模板编程时的情况），即`T t{}`
 
 + 推荐使用类模板中的最大值，而不是原来的宏定义`INT_MAX`等。即，推荐使用`<limits>`中的类模板`std::numeric_limits`
 
@@ -47,7 +47,7 @@
 
   > 注意`min()`和`lowest()`的区别：对于整数，两者相等。但是对于浮点数来说，最小值表示该类型可以表示的最小正数，最低值表示该类型能表示的最小负数，即`-max()`（有点反常规。。。）
 
-+ 由于统一初始化不允许*narrowing conversion*(《Effective Mordern C++》)，所以当需要转换时，推荐使用强制类型转换
++ 由于统一初始化不允许*narrowing conversion*(《Effective Modern C++》)，所以当需要转换时，推荐使用强制类型转换
 
   ```c++
   float MyFlt{3.14f};
