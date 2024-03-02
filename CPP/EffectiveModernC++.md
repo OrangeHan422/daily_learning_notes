@@ -807,7 +807,7 @@ using add_lvalue_reference_t =
   typename add_lvalue_reference<T>::type; 
 ```
 
-### 条款10： 有限考虑限域enum而非未限域enum
+### 条款10： 优先考虑限域enum而非未限域enum
 
 + 所谓的限域和未限域，在《C++20高级编程》中对应的就是新式的enum class声明和旧式的enum声明
 
@@ -925,3 +925,203 @@ if (static_cast<double>(c) < 14.5) {    //奇怪的代码，
   > 尽管仍然很长，但是新式声明可以防止隐式转换，同时可以避免命名污染。
   >
   > 因此，无论何时，最好使用新式声明
+
+### 条款11：优先考虑使用deleted函数而非使用未定义的私有声明
+
+主要是针对C++98的改进。旧的C++如果对拷贝构造函数和拷贝赋值函数运算符设置权限主要是将其设置为私有的，而新式C++推荐使用`delete`。比如，输入输出流的基类`basic_ios`的定义(单例模式)：
+
+```c++
+//C++98的定义，利用私有化防止访问
+template <class charT, class traits = char_traits<charT> >
+class basic_ios : public ios_base {
+public:
+    …
+
+private:
+    basic_ios(const basic_ios& );           // not defined
+    basic_ios& operator=(const basic_ios&); // not defined
+};
+//C++11使用= delete标记函数为deleted function
+template <class charT, class traits = char_traits<charT> >
+class basic_ios : public ios_base {
+public:
+    …
+
+    basic_ios(const basic_ios& ) = delete;
+    basic_ios& operator=(const basic_ios&) = delete;
+    …
+};
+```
+
+*deleted*函数不能以任何方式被调用，即使你在成员函数或者友元函数里面调用*deleted*函数也不能通过编译（注意：`private`就会存在这些问题，即类内可调用，友元可调用）。
+
+另一点是，将deleted函数设置为`public`的好处是，编译器可以产生更好的错误信息
+
+`delete`可以用于任何函数。比如，在防止C的隐式转换时：
+
+```c++
+bool isLucky(int number);
+if (isLucky('a')) …         //字符'a'是幸运数？
+if (isLucky(true)) …        //"true"是?
+if (isLucky(3.5)) …         //难道判断它的幸运之前还要先截尾成3？
+bool isLucky(int number);       //原始版本
+bool isLucky(char) = delete;    //拒绝char
+bool isLucky(bool) = delete;    //拒绝bool
+bool isLucky(double) = delete;  //拒绝float和double
+```
+
+再比如，**禁止一些模板的实例化**：
+
+```c++
+//假如模板函数接收指针参数，但是拒绝void *和char *类型
+template<typename T>
+void processPointer(T* ptr);
+//注意，这里是模板特化的形式---------->记得回顾现代C++模板编程！
+template<>
+void processPointer<void>(void*) = delete;
+
+template<>
+void processPointer<char>(char*) = delete;
+
+template<>
+void processPointer<const void>(const void*) = delete;
+
+template<>
+void processPointer<const char>(const char*) = delete;
+```
+
+**总结**：坚定不移的使用`delete`而不是`private`私有化。因为你有的我都有，我有点你没有！
+
+### 条款12： 使用override声明重写函数
+
+> 首先需要注意的是，重写（*overriding*）不是重载（*overloading*）！！
+>
+> 重写：唯一情况，虚函数在派生类被重写。
+>
+> 重载：同名函数，参数不同的版本可以称之为重载，对虚函数，普通函数等都适用
+
+重写的经典实例：
+
+```c++
+class Base {
+public:
+    virtual void doWork();          //基类虚函数
+    …
+};
+
+class Derived: public Base {
+public:
+    virtual void doWork();          //重写Base::doWork
+    …                               //（这里“virtual”是可以省略的）
+}; 
+
+std::unique_ptr<Base> upb =         //创建基类指针指向派生类对象
+    std::make_unique<Derived>();    //关于std::make_unique
+…                                   //请参见Item21
+
+upb->doWork();                      //通过基类指针调用doWork，
+                                    //实际上是派生类的doWork
+                                    //函数被调用
+```
+
+重写一个函数，必须满足下列要求：
+
++ 基类函数必须是`virtual`
+
++ 基类和派生类的函数名必须完全一样（除非是析构函数）
+
+  > 实际上，析构函数也是一样的，因为所有的析构函数，编译器都会将其转换为destroy()函数
+
++ 基类和派生类的形参类型必须完全一样（和重载的重要区别）
+
++ 基类和派生类的常量性`constness`必须完全一样
+
++ 基类和派生类函数的返回值和异常说明（*exception specifications*）必须**兼容**
+
++ *(C++11新约束)*：函数的引用限定符(reference qualifiers)必须完全一样。成员函数的引用限定符可以限定函数只能用于左值或者右值，即使非虚函数也可以使用：
+
+  ```c++
+  class Widget {
+  public:
+      …
+      void doWork() &;    //只有*this为左值的时候才能被调用
+      void doWork() &&;   //只有*this为右值的时候才能被调用
+  }; 
+  …
+  Widget makeWidget();    //工厂函数（返回右值）
+  Widget w;               //普通对象（左值）
+  …
+  w.doWork();             //调用被左值引用限定修饰的Widget::doWork版本
+                          //（即Widget::doWork &）
+  makeWidget().doWork();  //调用被右值引用限定修饰的Widget::doWork版本
+                          //（即Widget::doWork &&）
+  ```
+
+那么为什么要使用`override`呢？因为如果没有`override`修饰，那么在派生类中“重写”基类虚函数时，如果没有遵守上述条款，依旧可以通过编译，并且编译器不会告诉你任何warning。即，你以为你重写了，但是你没有，编译器也不知道你是在重写，还是在覆盖。实例如下：
+
+```c++
+class Base {
+public:
+    virtual void mf1() const;
+    virtual void mf2(int x);
+    virtual void mf3() &;
+    void mf4() const;
+};
+//派生类均未重写，但是可以通过编译
+class Derived: public Base {
+public:
+    virtual void mf1();
+    virtual void mf2(unsigned int x);
+    virtual void mf3() &&;
+    void mf4() const;
+};
+//为了确认是否正确的重写，应该加上override，这样出现错误就不能通过编译
+class Derived: public Base {
+public:
+    virtual void mf1() override;
+    virtual void mf2(unsigned int x) override;
+    virtual void mf3() && override;
+    virtual void mf4() const override;
+};
+```
+
+C++11引入了两个上下文关键字*contextual keywords*），`override`和`final`（向虚函数添加`final`可以防止派生类重写。`final`也能用于类，这时这个类不能用作基类）。这两个关键字区别于一般的关键字，是可以当做名称使用的，因为他们仅在特定的位置才会别解析为关键字。
+
+对于引用限定，虽然很少用，但是对于C++程序员来说，凡是可以优化性能的点，都有必要了解，考虑以下情形：
+
+```c++
+class Widget {
+public:
+    using DataType = std::vector<double>;  
+    …
+    DataType& data() { return values; }//仅提供了返回左值引用的成员方法
+    …
+private:
+    DataType values;
+};
+//对于左值调用，没有问题
+Widget w;
+…
+auto vals1 = w.data();  //拷贝w.values到vals1
+//但是对于临时对象(右值)调用，编译器会将临时对象的值拷贝一次。
+//但是，右值完全可以使用移动来提高性能，减少拷贝
+Widget makeWidget();
+auto vals2 = makeWidget().data();   //拷贝Widget里面的值到vals2
+
+//因此，应该做如下修改：
+class Widget {
+public:
+    using DataType = std::vector<double>;
+    …
+    DataType& data() &              //对于左值Widgets,
+    { return values; }              //返回左值
+    
+    DataType data() &&              //对于右值Widgets,
+    { return std::move(values); }   //返回右值
+    …
+
+private:
+    DataType values;
+};
+```
+
