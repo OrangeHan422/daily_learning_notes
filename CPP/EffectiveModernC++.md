@@ -1125,3 +1125,65 @@ private:
 };
 ```
 
+### 条款13： 有限const_iterator而不是iterator
+
+> 仍然是《Effective C++》中的条款，即尽可能的使用const属性，可以使代码更加稳定和健壮
+
+`C++11`中使用实例如下：
+
+```c++
+std::vector<int> values;                                //和之前一样
+…
+auto it =                                               //使用cbegin
+    std::find(values.cbegin(), values.cend(), 1983);//和cend
+values.insert(it, 1998);
+```
+
+但是`C++11`标准存在一个疏漏，那就是没有提供非成员函数(*free function*)版本的cbegin()和cend()，那么在模板编程中就会存在一些障碍;（在`C++14`中进行了修正）
+
+```c++
+template<typename C, typename V>
+void findAndInsert(C& container,            //在容器中查找第一次
+                   const V& targetVal,      //出现targetVal的位置，
+                   const V& insertVal)      //然后在那插入insertVal
+{
+    using std::cbegin;
+    using std::cend;
+	//为什么使用非成员版本的cbegin,cend,是为了考虑非容器的情况
+    auto it = std::find(cbegin(container),  //非成员函数cbegin
+                        cend(container),    //非成员函数cend
+                        targetVal);
+    container.insert(it, insertVal);
+}
+//以上代码在C++14中没有任何问题，但是如果想在C++11中支持，需要自定义cbegin,cend
+template <class C>
+auto cbegin(const C& container)->decltype(std::begin(container))
+{
+    return std::begin(container);   //解释见下
+}
+//注意，const的限定是以模板参数的形式展现的，即const容器调用非成员函数begin将产生出const_iterator
+//对于C数组，C++11提供了特化版本，返回的是pointer-to-const
+```
+
+### 条款14： 如果函数不抛出异常，请使用noexcept
+
+`noexcept`和`const`一样重要，如果确定函数不会抛出异常，就声明为`noexcept`。
+
+```c++
+int f(int x) throw();   //C++98风格，没有来自f的异常
+int f(int x) noexcept;  //C++11风格，没有来自f的异常
+```
+
+`noexcept`的好处是，方便排查（比如工作中遇到的sleep_hook问题）。另一个好处是，`noexcept`函数编译器会进行尽可能的优化（比如遇到异常不再执行反序析构），而旧式的声明就不会优化
+
+```c++
+RetType function(params) noexcept;  //极尽所能优化
+RetType function(params) throw();   //较少优化
+RetType function(params);           //较少优化
+```
+
+该设计在源码中就有体现，在C++98中vector需要扩容时，是通过将旧元素复制到新内存中实现的，这样做虽然安全（因为只有所有元素都复制完毕，旧元素才析构），但是性能没有移动操作好。所以在C++11中，替换为了移动操作。但是移动操作如果中途出现了异常，就无法保持操作的“原子性”，也无法返回原始状态。所以就使用了`noexcept`(以及move_if_noexcept，较为复杂，暂时忽略)。
+
+**总结**：`noexcept`的设计可能被调用者依赖；同时会带来性能的提升；但是大多数函数都是*异常中立*的，所以不应该使用`noexcept`；
+
+综上，如果没有十足的把握，不要使用，不然可能本末倒置。
