@@ -1239,6 +1239,8 @@ constexpr int pow(int base, int exp) noexcept   //C++14
 
 但是因为客户可能使用constexpr的特性，所以，如果你确定该函数可以在编译期计算出，就使用吧。
 
+> 在C++20中，提出了新的关键字`consteval`,`consteval`可以保证函数只能在编译期使用，而不能在运行期使用---->《C++20高级编程》
+
 ### 条款16：让const成员函数线程安全
 
 > 新知识：`mutable`关键字，即使在const函数中也可以改变。该关键字的意思是该变量永远是可变的
