@@ -1187,3 +1187,66 @@ RetType function(params);           //较少优化
 **总结**：`noexcept`的设计可能被调用者依赖；同时会带来性能的提升；但是大多数函数都是*异常中立*的，所以不应该使用`noexcept`；
 
 综上，如果没有十足的把握，不要使用，不然可能本末倒置。
+
+### 条款15：尽可能的使用constexpr
+
+constexpr声明的函数或者类，必须在编译期可以计算。constexpr函数只能调用constexpr函数
+
+> 不能假设`constexpr`函数的结果是`const`的，也不能保证他们是在编译期是可知的
+
+所有的`constexpr`对象都是`const`的，但不是所有的`const`对象都是`constexpr`
+
+对于constexpr函数：
+
++ constexpr函数可以用于需求*编译期常量*的上下文。如果传给constexpr函数的**实参**在编译期可知，那么结果将在编译期计算。如果**实参**的值自编译期不知道，代码将会被拒绝。
++ 当一个constexpr函数被一个或者多个编译期不可知的值调用时，它就像普通函数一样，运行时计算他的结果。这就意味着不需要书写两个函数，constexpr全做了（就像const类型的参数可以接受const和非const参数一样）
+
+简单的实例：
+
+```c++
+constexpr                                   //pow是绝不抛异常的
+int pow(int base, int exp) noexcept         //constexpr函数
+{
+ …                                          //实现在下面
+}
+constexpr auto numConds = 5;                //（上面例子中）条件的个数
+std::array<int, pow(3, numConds)> results;  //结果有3^numConds个元素
+//但是如果实参不是编译期常量，那么就是一个正常的运行时的函数
+auto base = readFromDB("base");     //运行时获取这些值
+auto exp = readFromDB("exponent"); 
+auto baseToExp = pow(base, exp);    //运行时调用pow函数
+```
+
+在C++11中，constexpr函数只能有一行语句，但是C++14解除了这样的限制，比如上述pow函数的实现：
+
+```c++
+//c++11
+constexpr int pow(int base, int exp) noexcept
+{
+    return (exp == 0 ? 1 : base * pow(base, exp - 1));
+}
+//c++14
+constexpr int pow(int base, int exp) noexcept   //C++14
+{
+    auto result = 1;
+    for (int i = 0; i < exp; ++i) result *= base;
+    
+    return result;
+}
+```
+
+**总结**：尽可能的使用constexpr，就像const一样，constexpr可以最大化对象和函数可以使用的场景；
+
+但是因为客户可能使用constexpr的特性，所以，如果你确定该函数可以在编译期计算出，就使用吧。
+
+### 条款16：让const成员函数线程安全
+
+> 新知识：`mutable`关键字，即使在const函数中也可以改变。该关键字的意思是该变量永远是可变的
+
+主要是涉及`mutable`的情况，可以使用`std::mutex`来进行互斥计算，同时也可以使用`std::atomic`变量，可以比互斥量性能更好。
+
+note：该条款存在错误，且情况罕见（就目前而言）
+
+### 条款17：理解特殊成员函数的生成
+
+默认生成的函数仅在需要的时候才生成，且默认是`public`和`inline`非虚函数。
