@@ -397,3 +397,26 @@ string str{"C++20"};
 const string & constStr{as_const(str)};
 ```
 
+##### 1.1.35类型推断
+
+需要小心和`as_const()`使用的时候：`auto`的类型推导除了个别情况下，和模板类型推导法则一直（《Effective Mordern C++》）。而as_const和类型推导没关系，注意脑袋不要单线程！
+
+auto和统一初始化在C++17以后和C++14/C++11不同：
+
+```c++
+//拷贝列表初始化
+auto a = {11};//initializer_list<int>
+auto b = {11,22};//initializer_list<int>
+//直接列表初始化
+auto c{11};//int
+auto d{11,22};//error,too many elements
+auto e = {11,22.33}//compile error,列表初始化禁止变窄转换
+//而早期版本C++11/C++14的拷贝列表初始化和直接列表初始化，auto推断出来的都是initializer_lit<int>
+//拷贝列表初始化
+auto a = {11};//initializer_list<int>
+auto b = {11,22};//initializer_list<int>
+//直接列表初始化
+auto c{11};//initializer_list<int>
+auto d{11,22};//initializer_list<int>
+```
+
