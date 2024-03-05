@@ -1249,6 +1249,398 @@ constexpr int pow(int base, int exp) noexcept   //C++14
 
 note：该条款存在错误，且情况罕见（就目前而言）
 
-### 条款17：理解特殊成员函数的生成
+### 条款17 ： 理解特殊成员函数的生成
 
-默认生成的函数仅在需要的时候才生成，且默认是`public`和`inline`非虚函数。
+特殊成员函数即编译器会在*需要*的时候自动生成的函数：默认构造函数，析构函数，拷贝构造函数，拷贝赋值运算符。生成的函数默认是`public`且`inline`的。现代C++（自C++11开始）加入了移动构造函数和移动赋值函数。
+
+```c++
+class Widget {
+public:
+    …
+    Widget(Widget&& rhs);               //移动构造函数
+    Widget& operator=(Widget&& rhs);    //移动赋值运算符
+    …
+};
+```
+
+对于默认的移动函数，C++会对逐成员进行“移动”，核心是基于`std::move`的。但是，对于旧的C++类或者不支持移动操作的类，会在函数决议的时候选择复制的操作而不是移动的操作。
+
+有一点需要注意，对于两种拷贝函数，它们是相互独立的，即，如果声明了拷贝构造函数，那么编译器会在需要的时候自动生成拷贝赋值函数。两者没有直接的影响。但是，对于两个移动操作不是相互独立的，如果设声明了一个，另一个编译器并不会自动帮你生成。
+
+原因是，当自定义了移动函数，说明编译器自动生成的逐成员移动操作不一定正确了，所以编译器不再自动生成移动函数。
+
+更进一步的说，如果类显式声明了拷贝函数，那么编译器也不会生成移动操作。根本原因仍然是逐成员移动的原因。
+
+在*Rule of Three*的理论中，如果自定义了析构函数，那么逐成员拷贝或者移动操作都不再使用于该类。
+
+所以综上来说，仅当下述条件成立的时候才会生成移动操作（当需要的时候）：
+
++ 类没有拷贝操作
++ 类没有移动操作
++ 类没有自定义析构函数
+
+在C++11中对于已经声明了拷贝操作或者析构函数的类 的拷贝操作的自动生成。如果想要继续使用自动生成这个特性，需要添加`= default`关键字，如下：
+
+```c++
+class Widget {
+    public:
+    … 
+    ~Widget();                              //用户声明的析构函数
+    …                                       //默认拷贝构造函数
+    Widget(const Widget&) = default;        //的行为还可以
+
+    Widget&                                 //默认拷贝赋值运算符
+        operator=(const Widget&) = default; //的行为还可以
+    … 
+};
+```
+
+综合《Effective C++》，最好的习惯是将Rule of Three 扩展为Rule of Five。即使想要使用编译器自动生成的特殊成员函数，也要通过函数签名+`= default`的形式声明。
+
+## 第四章 智能指针
+
+> 为什么使用智能指针？原始指针太过强大，但是要看自己是否能够驯服。
+>
+> 智能指针应该是开发中首选的指针，除非你对性能有着痴狂的要求，否则尽量不要使用原始指针。
+
+### 条款18：对于独占资源使用std::unique_ptr
+
+比较令人意外的是，`std::unique_ptr`的大多数操作，和原生的指针的指令是相同的。这就意味着，即使你在内存和时间都比较紧张的情况下使用`std::unique_ptr`。
+
+`std::unique_ptr`是一个可移动(*move_only type*)类型。
+
+最经典的使用场景是作为继承层次结构中对象的工厂函数返回类型。即工厂函数在堆上分配一个对象并返回指针。示例：
+
+```c++
+class Investment { … };
+class Stock: public Investment { … };
+class Bond: public Investment { … };
+class RealEstate: public Investment { … };
+//工程函数应该声明如下
+template<typename... Ts>            //返回指向对象的std::unique_ptr，
+std::unique_ptr<Investment>         //对象使用给定实参创建
+makeInvestment(Ts&&... params);
+//用户调用如下：
+{
+    …
+    auto pInvestment =                  //pInvestment是
+        makeInvestment( arguments );    //std::unique_ptr<Investment>类型
+    …
+}                                       //销毁 *pInvestment
+```
+
+另一个使用的场景是，涉及指针的移动时。比如，将工厂函数的返回值放在容器中，再将容器作为一个对象的数据成员，在这种多级传递的情况下，智能指针可以保证对象被正常销毁。除非时类似`std::abort`这种中断时没有释放局部资源，这些情况并不是程序涉及可以控制的。
+
+默认情况下，销毁通过`delete`进行，但是`std::unique_ptr`可以使用**自定义删除器**：当函数销毁的时候，可以调用任何可以调用的对象，包括匿名函数，可调用类，函数等。简答的例子，在删除的时候打印日志：
+
+```c++
+auto delInvmt = [](Investment* pInvestment)         //自定义删除器
+                {                                   //（lambda表达式）
+                    makeLogEntry(pInvestment);
+                    delete pInvestment; 
+                };
+
+template<typename... Ts>
+std::unique_ptr<Investment, decltype(delInvmt)>     //更改后的返回类型
+makeInvestment(Ts&&... params)
+{
+    std::unique_ptr<Investment, decltype(delInvmt)> //应返回的指针
+        pInv(nullptr, delInvmt);
+    if (/*一个Stock对象应被创建*/)
+    {
+        pInv.reset(new Stock(std::forward<Ts>(params)...));
+    }
+    else if ( /*一个Bond对象应被创建*/ )   
+    {     
+        pInv.reset(new Bond(std::forward<Ts>(params)...));   
+    }   
+    else if ( /*一个RealEstate对象应被创建*/ )   
+    {     
+        pInv.reset(new RealEstate(std::forward<Ts>(params)...));   
+    }   
+    return pInv;
+}
+```
+
+> 注意代码中auto,decltype,lambda函数的使用，这些都是可以学习的
+
+需要注意的几点：
+
++ `std::unique_ptr`禁止使用裸指针进行初始化。如果没有完全适应现代C++，那么使用的流程应该是：初始化一个空的智能指针，然后通过reset将new出来的指针赋值给`std::unique_ptr`(更推荐现代化的方式：`std::make_unique`)
+
++ 通过上述代码可以知道，匿名函数仅对基类指针进行了释放。该方法可行的原因是多态，所以基类析构函数必须为虚函数（《Effective C++》有提及）,即
+
+  ```c++
+  class Investment {
+  public:
+      …
+      virtual ~Investment();          //关键设计部分！
+      …
+  };
+  ```
+
+  由于C++14以后`auto`支持函数返回类型的推导，所以工厂函数代码可以优化为：
+
+  ```c++
+  template<typename... Ts>
+  auto makeInvestment(Ts&&... params)                 //C++14
+  {
+      auto delInvmt = [](Investment* pInvestment)     //现在在
+                      {                               //makeInvestment里
+                          makeLogEntry(pInvestment);
+                          delete pInvestment; 
+                      };
+  
+      std::unique_ptr<Investment, decltype(delInvmt)> //同之前一样
+          pInv(nullptr, delInvmt);
+      if ( … )                                        //同之前一样
+      {
+          pInv.reset(new Stock(std::forward<Ts>(params)...));
+      }
+      else if ( … )                                   //同之前一样
+      {     
+          pInv.reset(new Bond(std::forward<Ts>(params)...));   
+      }   
+      else if ( … )                                   //同之前一样
+      {     
+          pInv.reset(new RealEstate(std::forward<Ts>(params)...));   
+      }   
+      return pInv;                                    //同之前一样
+  }
+  ```
+为什么使用匿名函数作为删除器？因为函数指针形式的删除器，会使`std::unique_ptr`的大小从一个字变为两个字（因为存储了裸指针和函数指针）；如果以函数对象的形式作为删除器，大小取决于函数对象中存储的状态有多少。无状态函数对象则对大小没有影响（比如不捕获变量的lambda表达式），所以，在可以使用lambda函数的时候，请尽量使用。
+
+另一种使用`std::unique_ptr`的经典场景是,使用`Pimpl Idiom`,即通过接口隐藏实现,从而减弱编译依赖性的一种设计。《Effective C++》条款31有叙述。
+
+`std::unique_ptr`使用的两种形式：`std::unique_ptr<T>`和指向数组的`std::unique_ptr<T[]>`,但是，对于第二种用法，现代C++程序员应该尽量不适用，因为有更好的`std::array`等替换方案。
+
+`std::unique_ptr`更吸引人的功能之一是，它可以轻松高效的转化为`std::shared_ptr`（类似编译器中的隐式转换），比如：
+
+```c++
+std::shared_ptr<Investment> sp =            //将std::unique_ptr
+    makeInvestment(arguments);              //转为std::shared_ptr
+```
+
+### 条款19：对于共享资源使用std::shared_ptr
+
+引用计数暗示性能问题：
+
++ `std::shared_ptr`大小是原始指针大小的两倍：两个指针，裸指针，和指向引用计数的指针
++ 引用计数的内存必须是动态分配的
++ 引用计数的递增递减都必须是原子的（多线程环境下尤为重要）
+
+`std::shared_ptr`构造函数**通常**递增引用计数。这里的通常主要是因为移动构造函数的存在。当从另一个`std::shared_ptr`移动构造新的`std::shared_ptr`时，原`std::shared_ptr`会置为空，同时由新的`std::shared_ptr`接管资源，这个时候引用计数是不需要增加的。
+
+虽然`std::shared_ptr`也提供删除器的操作，但是和`std::unique_ptr`不同的是，删除器在`std::shared_ptr`中并不是智能指针的一部分。共享指针的删除器更加的灵活，使用实例如下：
+
+```c++
+auto loggingDel = [](Widget *pw)        //自定义删除器
+                  {                     //（和条款18一样）
+                      makeLogEntry(pw);
+                      delete pw;
+                  };
+
+std::unique_ptr<                        //删除器类型是
+    Widget, decltype(loggingDel)        //指针类型的一部分
+    > upw(new Widget, loggingDel);
+std::shared_ptr<Widget>                 //删除器类型不是
+    spw(new Widget, loggingDel);        //指针类型的一部分
+//对于同一类的只能指针，可以对不同的对象定制化删除器
+auto customDeleter1 = [](Widget *pw) { … };     //自定义删除器，
+auto customDeleter2 = [](Widget *pw) { … };     //每种类型不同
+std::shared_ptr<Widget> pw1(new Widget, customDeleter1);
+std::shared_ptr<Widget> pw2(new Widget, customDeleter2);
+```
+
+这样做和唯一指针的区别是，尽管删除器不同，不同的共享指针也可以互相赋值。但是唯一指针就不可以，因为唯一指针中，删除器作为了唯一指针的成员。
+
+另一个不同的是，自定义删除器不会改变共享指针的大小。一个共享指针永远是**两个指针**大小。
+
+**注意**：两个指针指向的内容（奇怪的作者），该条款前面说的第二个指针指向引用计数不正确，应该指向的是一个控制块。控制块中存储的有引用计数，次级引用计数（*weak count*）,以及其他数据（包括但不限于自定义删除器，分配器，甚至还有虚函数相关的东西）
+
+控制块创建的原则：
+
++ `std::make_shared`(item 21)总是创建一个控制块。它创建一个要只想的新对象，所以可以确定`std::make_shared`调用时的对象没有控制块
++ 当从唯一指针转换为共享指针的时候，会创建控制块
++ 当从原始指针上创建共享指针的时候会创建控制块
+
+注意最后一条会造成的错误，当一个裸指针被用来创建多个共享指针时，会有多个控制块。考虑以下情形：
+
+```c++
+auto pw = new Widget;                           //pw是原始指针
+…
+std::shared_ptr<Widget> spw1(pw, loggingDel);   //为*pw创建控制块
+…
+std::shared_ptr<Widget> spw2(pw, loggingDel);   //为*pw创建第二个控制块
+```
+
+这是因为有两个控制块的存在，所以就会出现未定义行为
+
+解决方案有两个：
+
++ 使用`std::make_shared`构建函数原始指针，但是定义了自定义删除器时，`std::make_shared`就无能为力了
+
++ 如果必须传给共享指针原始指针来构造，那么最好直接将new的结果传入，再使用共享指针之间的赋值进行赋值。即代码应该做出如下更改：
+
+  ```
+  std::shared_ptr<Widget> spw1(new Widget,    //直接使用new的结果
+                               loggingDel);
+  std::shared_ptr<Widget> spw2(spw1);         //spw2使用spw1一样的控制块
+
+另一个特殊情形是，直接传递this指针给共享指针，考虑下述情形：
+
+```c++
+std::vector<std::shared_ptr<Widget>> processedWidgets;//用来记录已经处理过的Widget
+class Widget {
+public:
+    …
+    void process();
+    …
+};
+void Widget::process()
+{
+    …                                       //处理Widget
+    processedWidgets.emplace_back(this);    //然后将它加到已处理过的Widget
+}                                           //的列表中，这是错的！
+//如果外部已经有共享指针管理对象了呢，这个时候直接使用this构造（emplace_back）就会导致存在两个控制块。
+```
+
+对于该情形，C++已经提供了处理该情形的措施，就是`std::enable_shared_from_this`，使用实例：
+
+```c++
+class Widget: public std::enable_shared_from_this<Widget> {
+public:
+    …
+    void process();
+    …
+};
+void Widget::process()
+{
+    //和之前一样，处理Widget
+    …
+    //把指向当前对象的std::shared_ptr加入processedWidgets
+    processedWidgets.emplace_back(shared_from_this());
+}
+```
+
+`std::enable_shared_from_this`模板类的设计模式称之为奇异递归模板模式（*The Curiously Recurring Template Pattern*（*CRTP*）），心脏能力不好，不建议深究
+
+从内部来说，`shread_from_this`是先找到对象的控制块，然后创建新的共享指针关联这个控制块。所以，该函数的使用前提是外部已经有共享指针对对象进行了管理。
+
+为了防止客户端使用时出现上述问题，解决方案是将类的构造函数设置为`private`的，并通过返回共享指针的工厂函数进行创建对象，如（有点像工作中自己定义的MFC的日期类）：
+
+```c++
+class Widget: public std::enable_shared_from_this<Widget> {
+public:
+    //完美转发参数给private构造函数的工厂函数
+    template<typename... Ts>
+    static std::shared_ptr<Widget> create(Ts&&... params);
+    …
+    void process();     //和前面一样
+    …
+private:
+    …                   //构造函数
+};
+```
+
+共享指针虽然比唯一指针的性能差，但是对于相应的场景来说，这些开销是可以忍受的。如果不需要考虑共享性的问题，可以直接使用唯一指针，否则使用共享指针比裸指针加互斥，或者计数更高效和安全。
+
+需要注意的是，共享指针和控制块是不离不弃，同生共死的，所以共享指针不可以转换为唯一指针。
+
+共享指针针对的是单个对象，也就意味着不支持对C风格的数组进行管理。如果需要数组，请使用`std::array`
+
+### 条款20： 当std::shared_ptr可能悬空时使用std::weak_ptr
+
+注意，`std::weak_ptr`并不完全属于一种智能指针，它只是`std::shared_ptr`的增强，它没有解引用等操作
+
+`std::weak_ptr`通常从`std::shared_ptr`上创建。当从`std::shared_ptr`上创建`std::weak_ptr`时两者指向相同的对象，但是`std::weak_ptr`不会影响所指对象的引用计数：
+
+```c++
+auto spw =                      //spw创建之后，指向的Widget的
+    std::make_shared<Widget>(); //引用计数（ref count，RC）为1。
+                                //std::make_shared的信息参见条款21
+…
+std::weak_ptr<Widget> wpw(spw); //wpw指向与spw所指相同的Widget。RC仍为1
+…
+spw = nullptr;                  //RC变为0，Widget被销毁。
+                                //wpw现在悬空
+```
+
+悬空的`std::weak_ptr`是过期的(*expired*):
+
+```c++
+if (wpw.expired()) …            //如果wpw没有指向对象…
+```
+
+如果想通过`std::weak_ptr`构造共享指针，可以使用成员函数lock(),而不应该直接将弱指针作为共享指针的构造函数的参数：
+
+```c++
+std::shared_ptr<Widget> spw1 = wpw.lock();  //如果wpw过期，spw1就为空
+auto spw2 = wpw.lock();                     //同上，但是使用auto
+
+std::shared_ptr<Widget> spw3(wpw);          //如果wpw过期，抛出std::bad_weak_ptr异常
+```
+
+什么时候使用`std::weak_ptr`?
+
+**情形一**：一个工厂函数，基于一个唯一ID从只读对象中产出智能指针：
+
+```c++
+std::unique_ptr<const Widget> loadWidget(WidgetID id);
+```
+
+如果该函数的调用涉及数据库或者文件操作，并且重复使用ID的场景很常见，一个合理的优化是使用缓存设计，并且在使用完毕后释放缓存。
+
+对于缓存， 唯一指针不是最佳选择，因为用户需要接受缓存的智能指针，同时也要知道缓存的生命周期（即用户在使用结束后去释放缓存）。缓存指针本身也需要一个指针来管理缓存的对象，并且需要知道缓存指针是否悬空，因为客户端使用缓存对象后并释放缓存，关联的缓存条目就会悬空。
+
+综上，应该使用`std::weak_ptr`来关联缓存对象，而工厂函数的返回类型则应该是`std::shared_ptr`,因为只有对象被`std::shared_ptr`管理时，`std::weak_ptr`才能检测是否悬空。下面是一个简答的示例：
+
+```c++
+std::shared_ptr<const Widget> fastLoadWidget(WidgetID id)
+{
+    static std::unordered_map<WidgetID,
+                              std::weak_ptr<const Widget>> cache;
+                                        //译者注：这里std::weak_ptr<const Widget>是高亮
+    auto objPtr = cache[id].lock();     //objPtr是去缓存对象的
+                                        //std::shared_ptr（或
+                                        //当对象不在缓存中时为null）
+
+    if (!objPtr) {                      //如果不在缓存中
+        objPtr = loadWidget(id);        //加载它
+        cache[id] = objPtr;             //缓存它
+    }
+    return objPtr;
+}
+```
+
+> 题外话，自定义类的哈希，以及相等性函数都没有给出
+
+**情形二**：观察者设计模式（Observer design pattern）
+
+观察者设计模式一般有两种组件：subjects(状态可能会更改的对象)和observers(状态发生更改时要通知的对象)。
+
+在大多数场景下,subject对象会有一个指向observer的指针，方便发布状态更改的通知。subject对observer的生命周期没有兴趣，唯一关心的是observer被销毁后，就不再访问。因此，合理的设计是使用`std::weak_ptr`指向observer
+
+**情形三**：环装结构
+
+考虑下述场景：A -------->B<-------------C，即A和C都通过共享指针指向B
+
+此时，B需要一个指针指向A，可能的选择以及结果有三种:
+
++ 原始指针：如果A销毁了，那么B会指向一个悬空的指针，但是B不知道，可能会继续访问，导致未定义行为。
++ 共享指针：环状结构，AB将永远无法释放
++ 弱指针：正确的选择，因为及时A释放了，B是可以通过是否悬空来判断A是否还有效
+
+实际上，`std::weak_ptr`不影响引用计数只是为了方便理解，在上个条款提到的控制块中是存在次级引用的，次级引用就是针对`std::weak_ptr`设计的
+
+### 条款21：有限考虑使用std::make_shared,std::make_unique而非new
+
+前置：C++14才引入的`std::make_unique`,对于C++11，可以自己实现基础版本
+
+```c++
+template<typename T, typename... Ts>
+std::unique_ptr<T> make_unique(Ts&&... params)
+{
+    return std::unique_ptr<T>(new T(std::forward<Ts>(params)...));
+}
+```
