@@ -420,3 +420,352 @@ auto c{11};//initializer_list<int>
 auto d{11,22};//initializer_list<int>
 ```
 
+### ch02 使用string和stirng_view
+
+#### 2.1 动态字符串
+
+##### 2.1.1 C风格字符串
+
+字符串的最后一个字符是`null`字符(`\0`)，官方将这个`null`字符定义为`NUL`，注意，只有一个L，区别`NULL`
+
+##### 2.1.2 字符串字面量
+
+对于字符串字面量，就不需要转义字符了。原始字符串字面量以`R"(`开头，以`)"`结尾。如：
+
+```c++
+const char* str{R"(Hello "World"!)};//output: Hello "World"!
+//同样的，对于换行也不需要\n，直接回车即可
+const char *str {R"(Line1
+Line2)};
+/*output:
+Line1              -------------->enter here
+Line2*/
+//如果原始字符串中需要输出"()",用法类似sql客户端执行存储过程时开头定义一个特殊符号，结尾再重置，如：
+const char * str{R"-(Embedded )" characters)-"};  //"-" 就是标志开始和结束的符号
+```
+
+##### 2.1.3 C++std::string类
+
+除了常用的比较运算符重载，C++20还提供了三向运算符提供使用：
+
+```c++
+auto result{a <=> b};
+if(is_lt(result)){cout << "less" << endl;}
+if(is_gt(result)){cout << "greater" << endl;}
+if(is_eq(result)){cout << "equal" << endl;}
+```
+
+对于data()方法，在C++14以及更早的版本中，始终和c_str()一样返回`const char*`。从C++17开始，在非const字符上调用时，会返回`char*`(类似CString的GetString()和GetBuffer())
+
+注意一点：string调用find查看查找结果时，不应该和其他容器一样通过是否等于尾迭代器，而应该使用`string::npos`,如：
+
+```c++
+string str1{"hello"};
+string str2{"the world"};
+auto pos {str1.find("!!")};
+if(pos != string::npos){
+    //found "!!
+}
+```
+
+> 从C++20开始，std::string是constexpr类，这意味着string可用在编译期执行操作，并且可以使用于constexpr函数和类的实现
+
+当和auto配合使用时，如何区分`const char *`和`std::string`呢，答案是使用用户定义的标准字面量`s`将字面量解释为`std::string`：
+
+```c++
+auto string1{"hello"};//const char *
+auto string2{"hello"s};//std::string
+```
+
+标准用户定义字面量`s`在`std::literals::string_literals`名称空间中定义，需要前置声明以下语句之一：
+
+```c++
+using namespace std;
+using namespace std::literals;
+using namespace std::string_literals;
+using namespace std::literals::string_literals;
+```
+
+当你使用`vector`的`CTAD`特性推导`std::string`时，记得加上用户定义的标准字面量`s`:
+
+```c++
+vector names{"jerry","orange"};//vector<const char *>
+vector names{"jerry"s,"orange"s};//vector<std::string>
+```
+
+##### 2.1.4 数值转换
+
+数值转化为字符串：`std::to_string`
+
+字符串转化为数值，**可以指定起始位置和选择进制**（之前完全没用过）：
+
++ int stoi(const string &str,size_t *idx=0,int base=10);
++ long stol(const string &str,size_t *idx=0,int base=10);
++ unsigned long stoul(const string &str,size_t *idx=0,int base=10);
++ long long stoll(const string &str,size_t *idx=0,int base=10);
++ unsigned long long stoull(const string &str,size_t *idx=0,int base=10);
++ float stof(const string &str,size_t *idx=0,int base=10);
++ double stod(const string &str,size_t *idx=0,int base=10);
++ long double stold(const string &str,size_t *idx=0,int base=10);
+
+C++也提供了低级数据和字符串转换的函数，这些函数也是为所谓的*完美往返*而设计的，意味着将数值转换为字符串表示，再讲结果字符串反序列化为数值，结果与原始值完全相同。
+
+数值转换为字符串：
+
+```c++
+to_chars_result to_chars(char *first,char* last,IntegerT value,int base = 10);
+struct to_chars_result{
+    char* ptr;
+    errc ec;
+};
+//如果转换成功，ptr成员将等于所写入字符尾后一位置的指针。如果转换失败，即ec=errc::value_too_large,则ptr=last
+//使用实例：
+const size_t BufferSize{50};
+string out(BufferSize,' ');//string with 50 space characters
+auto result{to_chars(out.data(),out.data()+out.size(),12345)};//convert 123456 to chars
+if(result.ec == errc{}){cout << out << endl;}//conversiong success
+
+//使用结构化绑定，可以更简洁
+string out(BufferSize,' ');//string with 50 space characters
+auto [ptr,error]{to_chars(out.data(),out.data()+out.size(),12345)};
+if(error == errc{}){cout << out << endl;}//conversiong success
+
+//类似也提供了浮点数版本
+to_chars_result to_chars(char *first,char* last,FloatT value);
+to_chars_result to_chars(char *first,char* last,FloatT value,chars_format format);
+to_chars_result to_chars(char *first,char* last,FloatT value,chars_format format,int precision);
+enum class chars_format{
+    scientific,//(-)d.ddde±dd
+    fixed,	   //(-)ddd.ddd
+    hex,	   //(-)h.hhhp±d(Note:no 0x!)
+    general = fixed | scientific
+};
+//使用实例：
+double val{0.314};
+string out{BufferSize,' '};
+auto[ptr,error]{to_chars(out.data(),out.data()+out.size(),val)};
+if(error == errc{}){cout << out << endl;}//conversiong success
+
+//对于字符串转换为数字也提供一下方法：
+from_chars_result from_chars(const char *first,const char *last,IntegerT& value,int base = 10);
+from_chars_result from_chars(const char *first,const char *last,FloatT& value,chars_format format= chars_format::general);
+struct from_chars_result{
+    const char* ptr;
+    errc ec;
+};
+//结果ptr指向第一个未转换字符的指针。注意，from_chars()不会忽略任何前导空白
+```
+
+##### 2.1.5 std::string_view类
+
+C++17之前，在设置字符串实参的时候，为了兼容旧代码传入的`const char *`,一般会选择`const string&`作为形参。这样做会在传入`const char *`的时候构造一个临时字符串对象。而如果形参设置为`const char *`，则传入`std::string`的时候需要使用`c_str()`或者`data()`
+
+在C++17中，通过引入`std::string_view`类解决了所有这些问题，`std::string_view`是`std::basic_string_view`
+
+的实例，在`<string_view>`中定义。简而言之，`string_view`就是`const string&`的简单替代品，但不会产生开销。另外，`string_view`提供了`remove_prefix(size_t)`和`remove_suffix(size_t)`来收缩字符串。
+
+使用实例：
+
+```c++
+string_view func(string_view filename)
+{
+    return filename.substr(filename.rfind('.'));
+}
+//该函数可以用于所有类型的不同字符串
+stirng filename{R"(c:\temp)"};
+cout << format("C++ string:{}",func(filename)) << endl;
+
+const char *cString{R"(c:\temp)"};
+cout << format("C string:{}",func(cString)) << endl;
+
+cout << format("Literal:{}",func(R"(c::\temp)")) << endl;
+```
+
+`string_view`还提供一个构造函数，可以从非NUL终止的字符创中指定长度构件`string_view`。如果字符串以NUL结尾，则不需要统计字符数目。
+
+```c++
+const char *raw{...};
+size_t length{...};
+cout << format("Raw:{}",func({raw,length}) << endl;
+//等价于：
+cout << format("Raw:{}",func(string_view{raw,length}) << endl;
+```
+
+> 即，当一个函数的参数使用const string&或者const char *时，可以使用std::string_view进行代替
+
+但是需要注意的是，无法从`string_view`直接转化为`string`。需要通过调用形如`string(string_view)`或者`string_view.data()`的形式构造`string`。因此在`string`重载的运算符中也不能直接使用`string_view`对象当做参数。但是`append()`是可以的。实例：
+
+```c++
+string_view func(string_view filename);
+void handle(const string&);
+//该调用是不允许的
+handle(func("test"));//func返回的是string_view，不能直接用来构造string
+//允许的调用如下:
+handle(func("test").data());
+handle(string{func("test")});
+//对于string的运算符是无法直接和string_view进行运算的
+strintg str{"hello"};
+string_view sv{" world"};
+auto result{str + sv};//error
+//应该是使用如下方式，或者使用append
+auto result{str+sv.data()};
+string res2{str};
+result2.append(sv.data(),sv.size());
+```
+
+注意：需要返回字符串的时候，还是需要返回`std::string`
+
+不能使用`string_view`保存一个临时字符串的视图：
+
+```c++
+stirng s{"hello"};
+string_view sv{s+"world"};
+cout << sv;//error sv is dead in line2
+```
+
+可以使用标准的用户定义字面量`sv`，将字符串字面量解释为`std::string_view`。如：
+
+```c++
+auto sv{"test"sv};
+//需要使用命名空间，声明为以下之一
+using namespace std::literals::string_view_literals;
+using namespace std::string_view_literals;
+using namespace std::literals;
+using namespace std;
+```
+
+#### 2.2 字符串格式化
+
+`format`中使用`{}`来作为占位符，占位符中的形式声明格式为`[index][:specifier]`,如果需要输出`"{or}"`应转义为`{{or}}`.
+
+对于index是可以省略的，但是指明的话可以自己控制顺序，类似QString。
+
+##### 2.2.1 格式说明符
+
+对于`[:specifier]`支持的形式如下：
+
+`[[fill]align][sign][#][0][width][.precision][type]`
+
++ width:指定参数的占位宽度,宽度可以在占位符中声明，也可以写为`{}`,然后宽度紧跟在填充实参的下一位
+
+  ```c++
+  cout << format("|{:5}|",42) << endl;	// output:|   42|
+  cout << format("|{:{}}|",42，7) << endl;// output:|     42|
+  ```
+
++ [fill]align:fill指定填充字符，align指定对其方式：
+
+  - `<`左对齐
+  - `>`右对齐
+  - `^`居中对齐
+
+  ```c++
+  cout << format("|{:_5}|",42) << endl;	// output:|___42|使用_填充三个空白
+  cout << format("|{:<{}}|",42，7) << endl;// output:|42     |，左对齐
+  cout << format("|{:_^5}|",42) << endl;	// output:|_42__|  使用_填充三个空白并居中对齐
+  ```
+
++ sign:是否显示数字符号
+
+  - `-`只显示负数的符号（default）
+  - `+`正负数的符号都显示
+  - `space`负数显示符号,整数显示空格
+
+  ```c++
+  cout << format("|{:<+5}|",42) << endl;  //|+42  |
+  cout << format("|{:< 5}|",42) << endl;  //| 42  |
+  cout << format("|{:< 5}|",-42) << endl; //|-42  |
+  ```
+
++ #:备用格式，如果整形启用，则会在数字前加入0x,0X,0b,0B等
+
++ type:指定值要被格式化的类型：
+
+  - 整形：b（二进制），B（二进制，指定#时，使用0B而非0b），d(十进制)，o（八进制），x（十六进制），X（十六进制，当指定#时，使用0X而非0x）。默认使用d
+  - 浮点型：e,E:科学计数法 f,F:固定表示法  g,G:通用表示法 a,A:带有字母的十六进制表示法，默认使用g
+  - 布尔型：s(以文本形式输出true,false)，b,B,d,o,x,X(整形表示)，默认使用s
+  - 字符型：c(输出字符副本)，b,B,d,o,x,X(整形表示)，默认使用c
+  - 字符串：s
+  - 指针：p（0X前缀的十六进制表示法）
+
++ precision：只能用于浮点和字符串类型。保留几位小数
+
++ 0：使用0填充空白width
+
+##### 2.2.3 支持自定义类型
+
+C++20格式库添加了对自定义类型的支持。需要编写`std::formatter`类模板的特化版本，该类模板包含两个方法模板：`parse()`和`format()`(具体使用在12章)
+
+简单示例：
+
+```c++
+class KV
+{
+    public:
+    	KV(string_view key,int val):m_key{key},m_val{val}{}
+    	int getVal() const{return m_val;}
+    private:
+    	string m_key;
+    	int m_value;
+};
+//该formatter类的特化版本仅支持格式化形式如：{:a}输出键 {:b}输出值 {:c}{}输出键值对
+template<>
+class formatter<keyValue>
+{
+    public:
+    	//parse()
+    	constexpr auto parse(auto & context)
+        {
+            auto iter{context.begin()};
+            const auto iter{context.end()};
+            if(iter == end || *iter == '}'){//default "fmt"
+                m_outputType = OutputType::KeyAndValue;
+                return iter;
+            }
+            
+            switch(*iter){//"fmt" with [:specifier]
+                case 'a':
+                    m_outputType = OutputType::KeyOnly;
+                    break;
+                case 'b':
+                    m_outputType = OutputType::ValueOnly;
+                    break;
+                case 'c':
+                    m_outputType = OutputType::KeyAndValue;
+                    break;
+                defaule:
+                    throw format_error{"Invalid KV format specifier"};
+            }
+            
+            ++iter;
+            if(iter != end && *iter != '}'){
+                throw format_error("Invalid KV format specifier");
+            }
+            return iter;
+        }
+    
+    	//format()
+    	auto format(const KeyCalues& kv,auto &context)
+        {
+            switch(m_outputType){
+                using enum OutputType;
+                case KeyOnly:
+                    return format_to(context.out(),"{}",kv.getKey());//将格式化好的数据写入context.out()
+                case ValueOnly:
+                    return format_to(context.out(),"{}",kv.getValue());
+                default:
+                    return format_to(context.out(),"{} - {}"，kv.getKey(),kv.getValue());
+            }
+        }
+    
+    private:
+    	enum class OutputType
+        {
+            KeyOnly,
+            ValueOnlu,
+            KeyAndValue
+		};
+    	OutPutType m_outputType{OutputType::KeyAndValue};
+};
+```
+
