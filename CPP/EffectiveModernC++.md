@@ -1644,3 +1644,359 @@ std::unique_ptr<T> make_unique(Ts&&... params)
     return std::unique_ptr<T>(new T(std::forward<Ts>(params)...));
 }
 ```
+
+总共有**三个make函数**：`std::make_shared`和`std::make_unique`都是接受任意个参数，然后*完美转发*到构造函数去动态分配一个对象，然后返回这个对象的指针。第三个make函数是`std::allocate_shared`和`std::make_shared`作用是一样的，但是第一个参数是一个用来动态分配内存的`allocater`
+
+使用make函数的原因：
+
+**原因一**：一个简单的例子区别使用与否make的差别：
+
+```c++
+auto upw1(std::make_unique<Widget>());      //使用make函数
+std::unique_ptr<Widget> upw2(new Widget);   //不使用make函数,没有办法使用auto
+auto spw1(std::make_shared<Widget>());      //使用make函数
+std::shared_ptr<Widget> spw2(new Widget);   //不使用make函数,没有办法使用auto
+```
+
+可以看到使用make相对简洁一些，并且避免了重复写类型导致的编译器的额外工作。
+
+**原因二**：使用make函数和异常安全有关。考虑下述场景：
+
+```c++
+//假设该函数按照某种优先级处理widget
+void processWidget(std::shared_ptr<Widget> spw, int priority);
+//有一个函数计算相关的优先级
+int computePriority();
+//并且我们在调用的时候使用new来创建共享指针
+processWidget(std::shared_ptr<Widget>(new Widget),  //潜在的资源泄漏！
+              computePriority());
+```
+
+为什么会存在资源泄漏的可能呢？原因是编译器将源码转换为目标代码的时候，一个函数的实参必须先被计算，然后才是函数调用。所以在执行processWidget函数前，会执行以下操作：
+
++ 表达式`new Widget`必须计算
++ 负责管理`new`出来的共享指针的构造函数必须被执行
++ `computePriority`必须运行
+
+但是`computePriority`和new以及共享指针的构造函数的执行顺序是不定的（就像多线程执行一样，没有存在竞态关系），所以如果在执行`computePriority`时，产生了异常，那么`new`出来的资源可能还没来得及被共享指针管理，也就没办法释放了。
+
+而使用`std::make_shared`相当于将new和共享指针的构造函数包在了一起，所以就算`make_shared`和`computePriority`任意一个函数抛出了异常，内存资源也可以得到妥善的释放。
+
+同样的，对于`std::make_unique`也是适用的。这些事情在编写**异常安全**的代码的时候十分重要。
+
+**原因三**
+
+直接使用`std::make_shared`和使用`new`相比会有效率上的提升。使用`std::make_shared`允许编译器生成更小更快的代码，并使用更简洁的数据结构。考虑下属情形：
+
+```c++
+std::shared_ptr<Widget> spw(new Widget);
+```
+
+这样的调用实际上分配了两次内存：一次是`new`，另一次则是在共享指针构造函数中创建的控制块。如果使用`std::make_shared`：
+
+```c++
+auto spw = std::make_shared<Widget>();
+```
+
+程序只进行了一次内存分配，同时容纳了对象和控制块。这种优化也减小的程序的静态大小，也提高了可执行代码的速度，也可以减少程序的内存占用。
+
+对于`std::make_shared`的效率分析同样适用`std::allocate_shared`
+
+*既然`make`函数这么好，为什么条款中说的是优先，而不像`constexpr`那样尽可能的使用呢？*
+
+**限制一**：`make`函数都不允许自定义删除器，但是唯一指针和共享指针有构造函数可以这么做。比如：
+
+```c++
+auto widgetDeleter = [](Widget* pw) { … };
+std::unique_ptr<Widget, decltype(widgetDeleter)>
+    upw(new Widget, widgetDeleter);
+
+std::shared_ptr<Widget> spw(new Widget, widgetDeleter);
+```
+
+这种情况下，只能使用new，而`make`函数没有办法做同样的事情。
+
+**限制二**：该限制来自于`make`实现的语法细节，仍然是前面的`initialiezer_list`构造函数相关的问题,`make`函数的完美转发使用的是小括号版本的函数，而不是花括号。这么做尽管可以避免函数决议出现问题，但是意味着如果你想用花括号初始化指向的对象，你需要直接`new`。但是花括号初始化无法完美转发，可以使用条款30介绍的方法：使用`auto`类型推导从花括号初始化创建`std::initializer_list`对象（条款2），然后将对象传递给`make`函数:
+
+```c++
+//创建std::initializer_list
+auto initList = { 10, 20 };
+//使用std::initializer_list为形参的构造函数创建std::vector
+auto spv = std::make_shared<std::vector<int>>(initList);
+```
+
+以上两个限制是`make`函数都会遇到的问题，以下的限制则仅是共享指针和它的`make`函数可能出现的问题：
+
+**共享指针make限制**：对于重载了`operator new`和`operator delete`类的成员不适合使用`std::allocate_shared`和释放（通过自定义删除器），这是因为重载的类对内存分配有特殊的要求，一般仅分配对象大小的内存，但是`std::allocate_shared`分配到内存还要包括控制块。
+
+虽然使用`std::make_shared`会比直接`new`快，但是对于释放，因为引用指针以及弱指针的存在，控制块不能立即释放，因为`make_shared`将对象和控制块分配在了同一块内存中，所以对象也不能立刻释放，直到控制块完成工作才能统一释放。
+
+如果既定义了删除器，有想要编写异常安全的代码，那么最好的方法是将共享指针的函数以及new操作放在一个**不做其他事情的语句中**（即最好单独拎出来）。比如：
+
+```c++
+void processWidget(std::shared_ptr<Widget> spw,     //和之前一样
+                   int priority);
+void cusDel(Widget *ptr);                           //自定义删除器
+//如果不能使用make_shared
+processWidget( 									    //和之前一样，
+    std::shared_ptr<Widget>(new Widget, cusDel),    //潜在的内存泄漏！
+    computePriority() 
+);
+//正确做法：
+std::shared_ptr<Widget> spw(new Widget, cusDel);
+processWidget(spw, computePriority());  // 正确，但是没优化，见下
+```
+
+该代码在性能上有一些缺陷，在非异常安全的版本中，我们传递的是一个右值，而对于异常安全版本我们使用的左值。这样会导致额外的复制开销，并且对于共享指针，复制还是移动的区别是有意义的。所以代码应该优化如下：
+
+```c++
+processWidget(std::move(spw), computePriority());   //高效且异常安全
+```
+
+### 条款22：当使用Pimpl惯用法，请在实现文件中定义特殊成员函数
+
+Pimpl:pointer to implememtation，即将类的数据成员替换成一个指向包含具体实现的类（或者结构体）的指针，并将放在主类的数据成员门移动到实现类中，这些数据成员通过指针访问，实例：
+
+```c++
+class Widget() {                    //定义在头文件“widget.h”
+public:
+    Widget();
+    …
+private:
+    std::string name;
+    std::vector<double> data;
+    Gadget g1, g2, g3;              //Gadget是用户自定义的类型
+};
+```
+
+在该类中要包含的类型有：`std::string`,`std::vector`,和`Gadget`，定义这些类的头文件在编译的时候都要包含进来，那么就会增加`Widget`的编译时间。同样的，如果这些类的一个头文件改变了，类`Widget`也要重新编译。
+
+在C++98中使用Pimpl惯用法，可以将`Widget`的数据成员替换为一个原始指针，指向一个已经被声明但是还没有被实现的结构体，如下：
+
+```c++
+class Widget                        //仍然在“widget.h”中
+{
+public:
+    Widget();
+    ~Widget();                      //析构函数在后面会分析
+    …
+
+private:
+    struct Impl;                    //声明一个 实现结构体
+    Impl *pImpl;                    //以及指向它的指针
+};
+```
+
+这样做最大的好处就是可以加速编译，即使依赖的头文件更改了，`Widget`的使用者不需要关心这些变动。
+
+Pimpl惯用法的第一步，声明一个数据成员，它是一个指正，指向一个不完整的类型。
+
+第二步是动态分配和回收一个对象，该对象包含以前在原来的类中的数据成员。内存的分配和回收都写在实现文件中。对于`Widget`而言，写在`Widget.cpp`中：
+
+```c++
+#include "widget.h"             //以下代码均在实现文件“widget.cpp”里
+#include "gadget.h"
+#include <string>
+#include <vector>
+
+struct Widget::Impl {           //含有之前在Widget中的数据成员的
+    std::string name;           //Widget::Impl类型的定义
+    std::vector<double> data;
+    Gadget g1,g2,g3;
+};
+
+Widget::Widget()                //为此Widget对象分配数据成员
+: pImpl(new Impl)
+{}
+
+Widget::~Widget()               //销毁数据成员
+{ delete pImpl; }
+```
+
+古老的代码，现代C++应该这么写头文件：
+
+```c+
+class Widget {                      //在“widget.h”中
+public:
+    Widget();
+    …
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> pImpl;    //使用智能指针而不是原始指针
+};
+```
+
+源文件：
+
+```c++
+#include "widget.h"                 //在“widget.cpp”中
+#include "gadget.h"
+#include <string>
+#include <vector>
+
+struct Widget::Impl {               //跟之前一样
+    std::string name;
+    std::vector<double> data;
+    Gadget g1,g2,g3;
+};
+
+Widget::Widget()                    //根据条款21，通过std::make_unique
+: pImpl(std::make_unique<Impl>())   //来创建std::unique_ptr
+{}
+```
+
+但是此时我们调用该类会出错：
+
+```c++
+#include "widget.h"
+
+Widget w;                           //错误！
+```
+
+原因是，唯一指针回收资源的时候会使用`static_assert`来确保原始指针指向的不是一个不完整的类型。我们要做的是，在编译器执行管理对象的时候，将被管理的对象的完整声明放在析构函数之前（或者说析构函数放在实现类或者结构体的后面）：
+
+```c++
+class Widget {                  //跟之前一样，在“widget.h”中
+public:
+    Widget();
+    ~Widget();                  //只有声明语句
+    …
+
+private:                        //跟之前一样
+    struct Impl;
+    std::unique_ptr<Impl> pImpl;
+};
+```
+
+```c++
+#include "widget.h"                 //跟之前一样，在“widget.cpp”中
+#include "gadget.h"
+#include <string>
+#include <vector>
+
+struct Widget::Impl {               //跟之前一样，定义Widget::Impl
+    std::string name;
+    std::vector<double> data;
+    Gadget g1,g2,g3;
+}
+
+Widget::Widget()                    //跟之前一样
+: pImpl(std::make_unique<Impl>())
+{}
+
+Widget::~Widget()                   //析构函数的定义（译者注：这里高亮）
+{}
+//或者这里可以更现代
+Widget::~Widget() = default;        //同上述代码效果一致
+```
+
+对于自动生成的移动操作，也是正合我意，但是不能再头文件使用关键字直接声明：
+
+```c++
+class Widget {                                  //仍然在“widget.h”中
+public:
+    Widget();
+    ~Widget();
+
+    Widget(Widget&& rhs) = default;             //思路正确，
+    Widget& operator=(Widget&& rhs) = default;  //但代码错误
+    …
+
+private:                                        //跟之前一样
+    struct Impl;
+    std::unique_ptr<Impl> pImpl;
+};
+```
+
+因为移动构造函数中可能会抛出异常的事件，这个事件里会生成销毁`pImpl`的代码。但是，我们还不知道`Impl`的完整定义。因此，应该和析构函数的做法一样，将关键字都放在源文件中：
+
+```c++
+class Widget {                          //仍然在“widget.h”中
+public:
+    Widget();
+    ~Widget();
+
+    Widget(Widget&& rhs);               //只有声明
+    Widget& operator=(Widget&& rhs);
+    …
+
+private:                                //跟之前一样
+    struct Impl;
+    std::unique_ptr<Impl> pImpl;
+};
+```
+
+```c++
+#include <string>                   //跟之前一样，仍然在“widget.cpp”中
+…
+    
+struct Widget::Impl { … };          //跟之前一样
+
+Widget::Widget()                    //跟之前一样
+: pImpl(std::make_unique<Impl>())
+{}
+
+Widget::~Widget() = default;        //跟之前一样
+
+Widget::Widget(Widget&& rhs) = default;             //这里定义
+Widget& Widget::operator=(Widget&& rhs) = default;
+```
+
+对于复制函数，可能我们也要自己书写，因为第一，对包含有只可移动(*move-only*)类型，比如`std::unique_ptr`的类，编译器不会发生复制操作；第二，即使编译器帮我们生成了，生成的复制操作也仅仅是浅拷贝，而我们实际需要的是深拷贝
+
+因此，我们对于拷贝也应该实现：
+
+```c++
+class Widget {                          //仍然在“widget.h”中
+public:
+    …
+
+    Widget(const Widget& rhs);          //只有声明
+    Widget& operator=(const Widget& rhs);
+
+private:                                //跟之前一样
+    struct Impl;
+    std::unique_ptr<Impl> pImpl;
+};
+```
+
+```c++
+#include <string>                   //跟之前一样，仍然在“widget.cpp”中
+…
+    
+struct Widget::Impl { … };          //跟之前一样
+
+Widget::~Widget() = default;		//其他函数，跟之前一样
+
+Widget::Widget(const Widget& rhs)   //拷贝构造函数
+: pImpl(std::make_unique<Impl>(*rhs.pImpl))
+{}
+
+Widget& Widget::operator=(const Widget& rhs)    //拷贝operator=
+{
+    *pImpl = *rhs.pImpl;
+    return *this;
+}
+```
+
+以上情形，仅仅是针对`std::unique_ptr`，对于`std::shared_ptr`则使用最原始的版本即可：
+
+```c++
+class Widget {                      //在“widget.h”中
+public:
+    Widget();
+    …                               //没有析构函数和移动操作的声明
+
+private:
+    struct Impl;
+    std::shared_ptr<Impl> pImpl;    //用std::shared_ptr
+};                                  //而不是std::unique_ptr
+```
+
+原因是，`std::unique_ptr`的删除器是自身的一部分，因此在编译器生成删除器之前，必须知道管理类型的完整定义。而`std::shared_ptr`而言，删除器并非自身的一部分，因此当编译器生成特殊成员函数被使用的时候，执行的对象不必是一个完整的类型。
+
+**总结**：对于Pimpl管用法，使用`std::unique_ptr`的时候，需要写出特殊成员函数，并且声明和实现要分别放在头文件和源文件中，即使是`= default`这种默认形式。
+
+但是对于`std::shared_ptr`，并没有太多的限制。
+
