@@ -1,5 +1,10 @@
 # Effective Modern C++
 
+> TODO:
+>
+> + 二刷时，条款24之前的所有引用折叠，更换为引用压缩(*reference collapsing*)，更官方。
+> + 对于条款20+的内容，尤其涉及右值引用，移动操作结合type trait时，待结合实操，模板理解更深刻时重刷，一刷仅通过引用压缩大概理解，底层逻辑模糊。
+
 ## 第一章 类型推导
 
 ### 条款1：理解类型推导
@@ -2000,3 +2005,146 @@ private:
 
 但是对于`std::shared_ptr`，并没有太多的限制。
 
+## 第五章 右值引用，移动语义，完美转发
+
+**移动语义**：可以使用廉价的移动操作替代昂贵的拷贝操作
+
+**完美转发**：可以将实参转发到其他的函数，使目标函数接收到的实参与被传递给转发函数的实参保持一致
+
+**右值引用**：是连接这两个不同概念的胶合剂。
+
+但是移动语义不一定执行移动操作，也不一定总是比拷贝快。完美转发也并不完美，右值引用也不一定是右值
+
+### 条款23：理解std::move和std::forward
+
+`std::move`不移动任何东西，`std::forward`也不转发任何东西。在运行时，它们不做任何事情，也不产生任何可执行代码，一字节也没有。
+
+`std::move`和`std::forward`仅仅是执行转换(cast)的函数(模板).`std::move`无条件将实参转换为右值，`std::forward`只在特定情况满足时进行转换。
+
+一个`std::move`的简单示例实现:
+
+```c++
+template<typename T>                            //在std命名空间
+typename remove_reference<T>::type&&			//返回一个指向同对象的引用
+move(T&& param)									//注意，这里是通用引用
+{
+    using ReturnType =                          //别名声明，见条款9
+        typename remove_reference<T>::type&&;
+
+    return static_cast<ReturnType>(param);
+}
+```
+
+由于引用压缩的原因，如果`T`恰好是一个左值引用，那么实参也会变成一个左值引用。为了避免如此，*type trait*`std::remove_reference`应用到了类型T上，确保`&&`被正确的应用到了一个不是引用的类型。这保证了`move`返回的真的就是右值引用。
+
+C++14可以更简单的实现：
+
+```c++
+template<typename T>
+decltype(auto) move(T&& param)          //C++14，仍然在std命名空间
+{
+    using ReturnType = remove_referece_t<T>&&;
+    return static_cast<ReturnType>(param);
+}
+```
+
+需要记住的核心是：`std::move`只进行转换，不移动任何东西。仅仅是将实参转换为右值，仅此而已。
+
+并且`std::move`并不代表一定就是移动，考虑以下情形：
+
+```c++
+class Annotation {
+public:
+    explicit Annotation(const std::string text)
+    ：value(std::move(text))    //“移动”text到value里；这段代码执行起来
+    { … }                       //并不是看起来那样
+    
+    …
+
+private:
+    std::string value;
+};
+```
+
+该例子中，执行的实际上是复制操作，原因是`std::move(text)`返回的是`const string &&`，当编译器进行函数决议时，会遇到两种可能:
+
+```c++
+class string {                  //std::string事实上是
+public:                         //std::basic_string<char>的类型别名
+    …
+    string(const string& rhs);  //拷贝构造函数
+    string(string&& rhs);       //移动构造函数
+    …
+};
+```
+
+即使此时`text`已经被转换为了右值，但是因为`const`属性，编译器调用的依旧是带有`const`参数限定的拷贝构造函数。
+
+综上总结：一：如果你希望移动对象，就不要声明（形参）对象为`const`，否则对`const`对象会转换为拷贝操作。二：`std::move`不仅不移动任何东西，它也不保证它执行转换的对象可以移动。
+
+`std::forward`和`std::move`情况相似，但是`std::forward`的转换时有条件的转换。考虑以下常见情形：
+
+```c++
+void process(const Widget& lvalArg);        //处理左值
+void process(Widget&& rvalArg);             //处理右值
+
+template<typename T>                        //用以转发param到process的模板
+void logAndProcess(T&& param)
+{
+    auto now =                              //获取现在时间
+        std::chrono::system_clock::now();
+    
+    makeLogEntry("Calling 'process'", now);
+    process(std::forward<T>(param));
+}
+//两次调用，分别是左值和右值调用
+Widget w;
+
+logAndProcess(w);               //用左值调用
+logAndProcess(std::move(w));    //用右值调用
+```
+
+`std::forward`是一个有条件的转换：当它的实参用右值初始化的时候，转换为右值。（困惑：如果引入引用压缩的概念不就不用这么麻烦的理解了吗，或许当时没有引用压缩的概念。该条款似乎将简单的问题复杂化了，尤其对于普通开发者来说）
+
+### 条款24：区分通用引用和右值引用
+
+> 前面所有提到的引用压缩实际上均应该叫做：引用折叠(*reference collapsing*),之前的困惑可能更应该归因于自己模板编程的薄弱。一刷暂时忽略，模板的理解需要结合实际去积累。
+
+大体上，**通用引用**指的是模板编程中`T&&`的形式，仅对右值或者右值引用推导为右值引用，其他情况均为左值引用。**右值引用**则是普通编程中的一个基础概念。
+
+具体有一些细节：
+
++ 通用引用的形式只能是`T&&`,甚至CV限定都不可以声明，通用引用会自己加上实参的CV限定。
+
++ 通用引用除了形式上的要求，另一点是仅发生在类型推导时(注意`auto&&`也属于通用引用)。注意vector中存在`T&&`形参，但是并非通用引用的情况，原因就是没有发生类型推导：
+
+  ```c++
+  template<class T, class Allocator = allocator<T>>   //来自C++标准
+  class vector
+  {
+  public:
+      void push_back(T&& x);
+      …
+  }
+  //原因是使用push_back时，不管声明时是否使用了CTAD，都已经确定了类型。即：
+  std::vector<Widget> v;
+  //因此调用push_back已经被实例化
+  class vector<Widget, allocator<Widget>> {
+  public:
+      void push_back(Widget&& x);             //右值引用
+      …
+  };
+  
+  
+  //但是emplace_back存在通用引用
+  template<class T, class Allocator = allocator<T>>   //依旧来自C++标准
+  class vector {
+  public:
+      template <class... Args>
+      void emplace_back(Args&&... args);
+      …
+  };
+  //原因是emplace_back是构造，并且模板参数包实际上也是模板类型加上“模式”，满足通用模板的形式T&&
+  ```
+
+  
