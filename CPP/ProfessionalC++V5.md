@@ -769,3 +769,179 @@ class formatter<keyValue>
 };
 ```
 
+### ch03 代码规范
+
+> 已经经历过上一家公司的折磨。人教人教不会，事教人记得牢。已经舔过屎山，体会了痛苦。
+
+## Part2 专业的C++设计
+
+> 和软件工程概述差不多，具体的设计在后续章节。该章节内容记录意义不大，更多的需要实践巩固。
+
+SOLID原则：
+
++ S:SRP(Single Responsibility Principle)单一责任原则
++ O:OCP(Open/Close Principle)开放/关闭原则
++ L:LSP(Liskov Substitution Principle)里氏替换原则
++ I:ISP(Interface Sergregation Principle)接口隔离原则
++ D:DIP(Dependency Inversion Principle)依赖倒置原则
+
+## Part3 C++编码方法
+
+### ch07 内存管理
+
+> 该章节内容较浅，推荐查看《Effective Mordern C++》章节4，更详细，更底层
+
+#### 7.1 使用动态内存
+
+##### 7.1.2 分配和释放
+
+good habit:释放内存后，记得置空(nullptr)         经常忘记-------->或者尽可能的使用智能指针
+
+`new`存在一个`nothrow`版本，在内存分配不足时返回空指针而非抛出异常，但是仍然推荐异常版本
+
+```c++
+int *ptr{new(nothrow) int};
+```
+
+##### 7.1.3 数组
+
+不要在C++中使用`realloc()`,十分危险
+
+#### 7.2 数组-指针的对偶性
+
+##### 7.2.1 数组就是指针
+
+> 标题容易让人困惑，该章节如果日后困惑，查看《C和指针》，讲述更清晰
+
+C++17提供了计算数组大小的功能
+
+```c++
+int arr[]{1,2,3};
+auto size = std::size(arr);//C++17
+auto size = sizeof(arr)//before C++17
+```
+
+#### 7.3 底层内存操作
+
+##### 7.3.2 自定义内存管理
+
+自行管理内存可用于减少开销。当使用`new`分配内存的时候，程序还需要少量的空间来记录分配了多少内存。这样对很小的对象或分配了大量对象的程序来说，这个开销的影响可能会很大。
+
+自定义`new`和`delete`在15章详细介绍
+
+#### 7.4 常见的内存陷阱
+
+虽然很清楚内存问题，但是记不住问题的名字，还是记录一下吧，方便和同事交流或者面试：
+
++ 内存泄漏:堆上分配的指针没有及时释放
++ 内存越界：经典实例是缓冲区溢出错误，即写入数组尾部后面的内存
++ 野指针：可以是内存泄漏的指针，也可以是释放后没有及时置空的指针
+
+#### 7.5 智能指针
+
+由于原子性和异步性不能保证，在C++17之前，使用智能指针和`new`会导致内存泄漏的问题《Effective Mordern C++》章节4，智能指针。C++17后改善了这个问题，但是为了考虑代码的稳定性，仍然推荐使用智能指针和`make`函数结合使用
+
+C++20以来提供了`make_unique_for_overwrite()`和`make_shared_for_overwrite()`函数来执行默认初始化值的构造函数。而原生的`make`函数使用的是值初始化。
+
+使用`unique_ptr`:
+
++ 使用`reset()`,可释放唯一指针的底层指针，并且可以根据需要将其改成另一个指针。
+
++ `release()`返回资源的底层指针，然后将智能指针置为`nullptr`。此时需要自己负责资源的释放
+
++ 唯一指针不能复制，只能进行移动：
+
+  ```c++
+  class Foo
+  {
+  public:
+      Foo(unique_ptr<int> data):m_data(move(data)){}
+  private:
+      unique_ptr<int> m_data;
+  };
+  auto myIntSmartPtr {make_unique<int>(42)};
+  Foo f{move(myIntSmartPtr)};
+  ```
+
+使用`shared_ptr`:
+
++ 和唯一指针的操作一致，但是不支持`release()`，可以使用`use_count()`检索共享同一资源的智能指针的数量
++ 可以使用`const_pointer_cast()`、`dynamic_pointer_cast()`、`static_pointer_cast()`和`reinterpret_pointer_cast()`对智能指针进行类型转换，使用方法和其他类型的C++类型转换一致
+
+访问`weak_ptr`中保存的指针:
+
++ 使用虚指针的`lock()`方法，该方法返回一个`shared_ptr`
++ 创建一个共享指针，使用虚指针作为构造函数的参数
+
+> 自C++17开始，虚指针可以像共享指针一样支持C风格的数组
+
+### ch08 熟悉类和对象
+
+#### 8.2 编写类
+
+##### 8.2.1 类定义
+
+C++20模块化的使用实例：
+
+```c++
+export module spreadsheet_cell;//当前模块名是spreadsheet_cell，并且通过export允许其他地方进行import
+
+export class SpreadsheetCell//如果该类允许客户使用，则应该使用export关键字
+{
+    public:
+    	void setValue(double val);
+    private:
+    	doublie m_value{0};//可以直接在定义中初始化成员变量。-------------->不记得在那本书看到，该形式部分编译器不支持，最好还是放在构造函数中使用初始化器进行初始化。
+}
+```
+
+```c++
+module spreadsheet_cell;//实现文件要先声明该实现文件实现的是哪个（些）模块
+
+void SpreadsheetCell::setValue(val)
+{
+    m_value = val;
+}
+```
+
+#### 8.3 对象的生命周期
+
+C++支持委托构造函数，允许构造函数初始化器调用同一个类的其他构造函数。
+
+委托构造函数允许构造函数调用同一个类的其他构造函数。然而，这个调用不能放在构造函体内，只能放在初始化器中，且必须是列表中唯一的初始化器
+
+```c++
+//委托构造函数示例
+SpreadsheetCell::SpreadsheetCell(string_view initialVal)//string_view 可以看做是const string&的简单替换，基本上就是指针和长度(const char* + size)
+    :SpreadsheetCell{stringToDouble(initialVal)}
+{}
+```
+
+需要注意，不使用统一初始化时，调用默认构造函数是不需要写`()`的，否则会因引起最头疼的解析(most vexing parse),比如：
+
+```c++
+SpreadsheetCell myCell();//可以编译通过，但是这不是一个对象变量声明。而是一个函数声明(无参，返回值为SpreadsheetCell)！！
+```
+
+单参数的构造函数可以将类对象隐式转换为参数类型，这种构造函数称为转换构造函数。如果不想出现隐式转换，则需要`explicit`关键字：
+
+```c++
+export class SpreadsheetCell
+{
+    public:
+    	explicit SpreasheetCell(std::string_view initialVal);
+}
+```
+
+> 建议将任何单参数构造函数标记为`explicit`，避免意外的隐式转换。除非你确定需要这种隐式转换
+
+从C++20开始，可以将布尔值传递给`explicit`,语法如下：
+
+```c++
+explicit(true) Myclass(int);
+```
+
+仅仅写出`explicit(true)`就等价于`explicit`。它在使用所谓的类型萃取的泛型模板代码中更加有用。使用类型萃取，可以查询给定类型的某些属性，例如某个类型是否可以转换为另一个类型。类型萃取的记过可以用作`explicit()`的参数。更多细节在26章“高级模板”中介绍。
+
+### ch09 精通类和对象
+
