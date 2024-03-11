@@ -945,3 +945,239 @@ explicit(true) Myclass(int);
 
 ### ch09 精通类和对象
 
+#### 9.2 对象中的动态内存分配
+
+##### 9.2.1 Spreadsheet类
+
+使用C的库，不一定支持模块，所以应该使用`#include`
+
+如果当前类需要使用另一个类，并且另一个类也要向客户提供，在C++20中应该如此定义：
+
+```c++
+module;
+#include <cstddef>//导入C的库需要执行如此操作
+
+export module spreadsheet;//当前模块为spreadsheet，需要向客户提供
+
+export import spreadsheet_cell;//spreadsheet类需要spreadsheet_cell类，并且spreadsheet_cell类需要向客户提供
+
+export class Spreadsheet
+{
+  ...  
+};
+```
+
+旧式的C++分配二维数组十分麻烦：
+
+```c++
+SpreadsheetCell ** m_cells{nullptr};
+size_t m_width{};
+size_t m_height{};
+m_cells = new SpreadsheetCell*[m_width];
+for(size_t i{0}; i < m_width; ++i){
+    m_cells[i] = new SpreadsheetCell[m_height];
+}
+```
+
+##### 9.2.3 处理复制和赋值
+
+在处理复制或者赋值的时候，我们需要一种全有或者全无的机制（类似数据库中的事务），为此我们需要使用“复制和交换”惯用方法。
+
+```c++
+export class Spreadsheet
+{
+    public:
+    	Spreadsheet& operator=(const Spreadsheet& rhs);
+    	void swap(Spreadsheet& othre) noexcept;//必须加上nocept，这样在遇到异常时，程序会直接终止，保证该函数要么成功，要么直接退出程序
+};
+
+//swap中可以直接使用标准库中的swap
+void Spreadsheet::swap(Spreadsheet& other)
+{
+    std::swap(m_width,other.m_width);
+    std::swap(m_height,other.m_height);
+    std::swap(m_cells,other.m_cells);
+}
+```
+
+注意：使用“复制和交换”就不需要执行自我赋值的检查了。
+
+标准库中`swap`的实现：
+
+```c++
+template <typename T>
+void swap(T& a,T& b)
+{
+    T temp(std::move(a));
+    a = std::move(b);
+    b = std::move(temp);
+}
+```
+
+##### 9.2.4 使用移动语义处理移动
+
+如果源对象是操作结束后会销毁的临时对象，或显式使用`std::move()`时，编译器会选择移动语义的函数进行执行。
+
+需要注意的是，即使是右值引用参数，在函数内，还是一个左值，因为它有名字。示例：
+
+```c++
+void helper(string &&msg){}//handleMsg调用该函数
+void handleMsg(string &&msg)//一个移动语义的函数
+{
+    helper(msg);//错误，msg是一个左值，因为它有名字！
+    helper(std::move(msg));//正确用法。
+}
+```
+
+移动语义应该使用`noexcept`限定符标记，因为移动语义是指针的操作，如果没有完成就抛出异常，会导致内存泄漏等问题
+
+```c++
+export class Spreadsheet
+{
+    public:
+    	Spreadsheet(Spreadsheet&& src) noexcept;
+    	Spreadsheet& operator=(Spreadsheet&& rhs) noexcept;
+};
+```
+
+定义在`<utility>`中的`std::exchange()`函数可以使用一个新值替换旧值，并且返回旧值。例如：
+
+```c++
+int a{11};
+int b{22};
+int ret{exange(a,b)};//交换后a=22,b=11,ret=11;
+
+//所以在函数中如果需要进行赋值，并且赋值对象需要置空，可以进行类似操作
+void moveFrom(Type& rhs) noexcept
+{
+    m_data = exchange(rhs.m_data,0);
+    /*等价于：
+    m_data = rhs.m_data;
+    rhs.m_data = 0;*/
+}
+```
+
+对于`return object`形式的语句，如果`object`是局部变量，函数参数，或者临时值，则会进行*返回值优化(RVO)*。如果`object`是一个局部比那辆，则会启动*命名返回值优化(NRVO)*。这两种优化都是复制省略的形式，即编译器自动执行移动语义。这就导致了所谓的*零拷贝值传递语义*。注意，不要自己使用`return std::move(object)`,如果对象不支持移动语义，则会使用复制语义影响性能。
+
+即：当函数返回一个局部变量或者参数的时候，直接写`return obj`就好了，不要使用`std::move()`画蛇添足。
+
+对于无论如何都要复制的参数，可以考虑使用**值传递**统一左值和右值函数。考虑如下情形：
+
+```c++
+class DataHolder
+{
+    public:
+    	void SetData(const std::vector<int>& data){m_data = data;}
+    	void SetData(const std::vector<int>&& data){m_data = std::move(data);}
+    private:
+    	std::vector<int> m_data;
+}
+
+//可以使用值传递进行统一:
+class DataHolder
+{
+    public:
+    	void SetData(std::vector<int> data){m_data = std::move(data);}
+    private:
+    	std::vector<int> m_data;
+}
+
+//原理：实参和形参结合实际上就是赋值操作
+/*如果传递左值：
+std::vector<int> ldata;
+data = ldata;此时执行的是左值的复制操作，将实参内容复制给形参
+对于函数体内，执行move操作移动的是形参（即ldata的副本）
+m_data = std::move(data);
+综上，传递左值 执行了一次复制操作
+
+如果传递右值：
+data = std::vector<int>{};
+执行的就是一个移动语义，没有复制操作
+函数体内也是移动语义，没有复制操作
+综上，传递右值 执行了零次复制操作*/
+```
+
+##### 9.2.5 零规则
+
+旧式C++因为存在`new`和`delete`类似自己管理内存的操作，所以需要遵循5规则(rule of five)。
+
+但是，如果完全使用现代C++，包括智能指针，标准模板库等，需要应用0原则(rule of zero),因为标准模板库中对于5函数定义更专业，自定义类如果使用的完全现代的C++，使用编译器默认生成的版本足够使用了。
+
+> 除非项目是完全使用现代C++，个人认为还是应该使用5原则。
+
+#### 9.3 与方法有关的更多内容
+
+##### 9.3.2 const方法
+
+应该养成习惯，将不修改对象的所有方法声明为const，这样可在程序中使用const对象的引用。
+
+有时候，const函数中可能需要改变数据成员，可以将数据成员设置为`mutable`，告诉编译器在const函数中，可以修改该变量：
+
+```c++
+mutable int dood{};
+int func(int param) const
+{
+    dood++;//mutable变量可以在const函数中进行修改
+    return param;
+}
+```
+
+##### 9.3.3 方法重载
+
+通常情况下，const版本和非const版本的实现是一样的。为了避免代码重复，可以使用Scott Meyer的`const_cast()`模式
+
+```c++
+export class Spreadsheet
+{
+  public:
+    SpreadsheetCell& GetCellAt(size_t x,size_t y);
+    const SpreadsheetCell& GetCellAt(size_t x,size_t y) const;
+};
+
+//对于原始的版本，const和非const函数体实现如下：
+const SpreadsheetCell& Spreadsheet::GetCellAt(size_t x,size_t y) const
+{
+    func(x,y);
+    return m_cells[x][y];
+}
+//使用Scott Meyer的const_cast()模式可以简化为			这样的模式对于函数体复杂时，可以大幅的减少代码量。
+SpreadsheetCell& Spreadsheet::GetCellAt(size_t x,size_t y) const
+{
+    return const_cast<SpreadsheetCell&>(as_const(*this).GetCellAt(x,y));
+}
+```
+
+当一个函数的两个版本，仅仅是返回值为左值或者右值的区别，我们无法重载，可以使用引用限定符进行重载：
+
+```c++
+const string &getText() const &
+{
+    return m_text;
+}
+string &&getText() &&
+{
+    return std::move(m_text);
+}
+```
+
+#### 9.5 嵌套类
+
+嵌套的类有权方位外围类的所有成员，而外围类只能访问嵌套类的`public`成员
+
+#### 9.7 运算符重载
+
+如果你定义了`operator==`，诸如`10 == MyClass`的表达式，C++20的编译器会帮你重写`MyClass == 10`,此外，编译器还会自动添加`!=`的支持。
+
+#### 9.8 创建稳定的接口
+
+基本原则是为每个类都定义两个类：接口类和实现类。
+
+接口类只有一个数据成员pimpl指针指向实现类
+
+实现类拥有和接口类完全一样的方法，以及实际需要的所有数据成员
+
+即pimpl idiom模式。这样做可以大大减小程序的编译依赖，从而提升编译速度。
+
+为将实现和接口分离，另一种方法是使用抽象接口以及实现该接口的实现类，抽象接口是只有纯虚函数的接口。
+
+### ch10 揭秘继承技术
