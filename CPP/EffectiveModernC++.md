@@ -2147,4 +2147,291 @@ logAndProcess(std::move(w));    //用右值调用
   //原因是emplace_back是构造，并且模板参数包实际上也是模板类型加上“模式”，满足通用模板的形式T&&
   ```
 
+### 条款25 对右值引用使用std::move,对通用引用使用std::forward
+
+当*右值引用*转发给其他函数的时候，右值引用应该别**无条件转换**为右值(通过`std::move`)，因为它们**总是**绑定凹右值；当转发*通用引用*时，通用引用应该有条件转换为右值(通过`std::forward`)，因为它们只是**有时**绑定到右值；
+
+```c++
+//对于右值引用，使用std::move
+class Widget {
+public:
+    Widget(Widget&& rhs)        //rhs是右值引用
+    : name(std::move(rhs.name)),
+      p(std::move(rhs.p))
+      { … }
+    …
+private:
+    std::string name;
+    std::shared_ptr<SomeDataStructure> p;
+};
+//对于通用引用，使用std::forward
+class Widget {
+public:
+    template<typename T>
+    void setName(T&& newName)           //newName是通用引用
+    { name = std::forward<T>(newName); }
+
+    …
+};
+```
+
+为什么要使用通用引用，而不是选择对左值和右值的函数进行重载呢？抛开源代码数量和代码运行的性能，单单从业务需求就可能无法实现。考虑一个函数需要接收**无限制**个数的参数，每个参数都可以是左值或者右值。经典实例就是`std::make_shared`（C++11），和`std::make_unique`（C++14）：
+
+```c++
+template<class T, class... Args>                //来自C++11标准
+shared_ptr<T> make_shared(Args&&... args);
+
+template<class T, class... Args>                //来自C++14标准
+unique_ptr<T> make_unique(Args&&... args);
+```
+
+**返回值优化**：可以避免复制局部变量的需要，通过在分配给函数返回值的内存中直接构造来实现。
+
+编译器可能在按值返回的函数中消除对局部对象的拷贝(或者移动)，如果满足以下条件：
+
++ 局部对象与函数返回值的类型相同
++ 局部对象就是函数要返回的东西
+
+函数形参则不适合。
+
+RVO通过局部对象是否命名分为RVO和NRVO(命名返回值优化)
+
+为什么自己使用`return std::move(obj)`对局部变量进行移动再返回不会启用编译器的返回值优化呢？因为`std::move`返回的是一个引用，这和返回值优化的条件一(局部对象与函数返回值的类型相同)相违背。
+
+综合《C++20高级编程》第9章，如果需要返回局部对象，直接返回就好，不要考虑`std::move()`或者`std::forward()`，因为大佬比你考虑的更多且经过了大量测试。
+
+### 条款26：避免在通用引用上重载
+
+总结：通用引用可以说是C++中最贪婪的匹配，几乎可以匹配任何类型。所以如果重载，需要考虑很多情况，比如：
+
+```c++
+template<typename T>
+void logAndAdd(T&& name)
+{
+    auto now = std::chrono::system_clock::now();
+    log(now, "logAndAdd");
+    names.emplace(std::forward<T>(name));
+}
+
+std::string petName("Darla");           //跟之前一样
+logAndAdd(petName);                     //跟之前一样，拷贝左值到multiset
+logAndAdd(std::string("Persephone"));	//移动右值而不是拷贝它
+logAndAdd("Patty Dog");                 //在multiset直接创建std::string
+                                        //而不是拷贝一个临时std::string
+
+
+//如果需要使用索引获取名字并写入日志呢，应该如下重载
+std::string nameFromIdx(int idx);   //返回idx对应的名字
+
+void logAndAdd(int idx)             //新的重载
+{
+    auto now = std::chrono::system_clock::now();
+    log(now, "logAndAdd");
+    names.emplace(nameFromIdx(idx));
+}
+```
+
+但是存在的问题是，如果传入的参数类型为`short`,`size_t`，函数决议依旧会选择通用引用实例化出的函数，因为它们不需要隐式转换，更加精确。
+
+### 条款27：熟悉通用引用重载的替代方法
+
+#### 方案一：放弃重载
+
+放弃重载，通过函数名称来区分。比如条款26中的函数，可以更改为`logAndAddName`和`logAndAddIdx`来区分。
+
+#### 方案二：传递const T&
+
+退回到旧式C++，虽然效率没有通用引用高，但是更加正确。
+
+#### 方案三：传值
+
+同《C++20高级编程》ch09中提倡的一致，可以使用值传递来统一拷贝和移动函数：
+
+```c++
+class Person {
+public:
+    explicit Person(std::string n)  //代替T&&构造函数，
+    : name(std::move(n)) {}         //std::move的使用见条款41
   
+    explicit Person(int idx)        //同之前一样
+    : name(nameFromIdx(idx)) {}
+    …
+
+private:
+    std::string name;
+};
+```
+
+#### 方案四：使用*tag dispatch*
+
+如果使用通用引用的动机是完美转发，那么就只能使用通用引用了，此时重载不可避免。
+
+解决方法是：Pimpl＋工作中自己定义的CString中使用的tag区分宽窄字符
+
+```c++
+template<typename T>
+void logAndAdd(T&& name)
+{
+    logAndAddImpl(
+        std::forward<T>(name),
+        //这里使用remove_reference是因为对于int&，使用is_integral返回的是false，所以需要去除引用
+        std::is_integral<typename std::remove_reference<T>::type>()//C++11
+        //std::is_integral<typename std::remove_reference_t<T>>()//C++14
+    );
+}
+
+
+template<typename T>                            //非整型实参：添加到全局数据结构中
+void logAndAddImpl(T&& name, std::false_type)	//译者注：高亮std::false_type
+{
+    auto now = std::chrono::system_clock::now();
+    log(now, "logAndAdd");
+    names.emplace(std::forward<T>(name));
+}
+
+std::string nameFromIdx(int idx);           //与条款26一样，整型实参：查找名字并用它调用logAndAdd
+void logAndAddImpl(int idx, std::true_type) //译者注：高亮std::true_type
+{
+  logAndAdd(nameFromIdx(idx)); 
+}
+```
+
+需要注意的的是上述的`std::false_type`和`std::true_type`:因为我们的`true`和`false`是运行时得到的，但是我们的函数重载是在编译时决策。如果单单一个`bool`类型，是无法重载函数的。所以标准库提供了`std::false_type`和`std::true_type`两个类，代表`is_integral`结果的两个类型（是整型，非整型）。
+
+`std::false_type`和`std::true_type`就是所谓的“标签”(tag),通过标签“分发”(dispatch)给正确的重载。因此这个设计称之为：*tag dispatch*。这是模板元编程的标准构件模块。
+
+#### 方案五：约束使用通用引用的模板
+
+通过tag dispatch是可以解决很多问题，但是当遇到构造函数结合通用引用时，就会出现问题。因为编译器会自动生成一些函数。此时，编译器生成的函数就*可能*绕过分发。
+
+此时，需要一种技术，可以让你确定使用通用引用模板的条件，那就是`std::enable_if`
+
+`std::enable_if`可以提供一种强制编译器执行行为的一种方法，就像是特定模板不存在一样。默认情况下，所有模板都是**启动(enabled)**的，但是，使用`std::enable_if`可以使得仅在`std::enable_if`的条件满足的情况下才启用。
+
+使用示例：
+
+```c++
+class Person {
+public:
+    template<typename T,
+             typename = typename std::enable_if<condition>::type>   //condition为某其他特定条件
+    explicit Person(T&& n);
+    …
+};
+```
+
+对于`std::enble_if`具体发生了什么，需要自行学习“SFINAE”
+
+这里我们向表示的条件是确认`T`不是`Person`，即模板函数应该在`T`不是`Person`的时候启用。此时我们需要type trait中的`std::is_same`来确定类型是否相同。但是该函数和上个方案中的`std::is_interger`一样（对于引用返回的是false），对于引用类型和非引用类型比较，总是返回false。即`std::is_same<Person,Person&>::value`返回的是false。（对于CV限定也是一样的，都需要注意）。
+
+对此type trait也提供了`std::decay`。`std::decay<T>::value`会去除CV限定和引用的修饰。
+
+所以，我们`std::enable_if<condition>::type`中的`condition`就应该是
+
+```c++
+!std::is_same<Person,typename std::decay<T>::type>::value
+```
+
+更新后的代码应该如下：
+
+```c++
+class Person {
+public:
+    template<
+        typename T,
+        typename = typename std::enable_if<
+                       !std::is_same<Person, 
+                                     typename std::decay<T>::type
+                                    >::value
+                   >::type
+    >
+    explicit Person(T&& n);
+    …
+};
+```
+
+此时还需考虑另一个问题，如果存在继承呢，派生类的构造函数想要调用基类的构造函数来构造基类部分内容，而此时传入基类构造函数的类型不再是`Person`,而是`SpecialPerson`，示例：
+
+```c++
+class SpecialPerson: public Person {
+public:
+    SpecialPerson(const SpecialPerson& rhs) //拷贝构造函数，调用基类的
+    : Person(rhs)                           //完美转发构造函数！
+    { … }
+    
+    SpecialPerson(SpecialPerson&& rhs)      //移动构造函数，调用基类的
+    : Person(std::move(rhs))                //完美转发构造函数！
+    { … }
+    
+    …
+};
+```
+
+所以说，站在巨人的肩膀上是很舒服的，*type trait*提供了`std::is_base_of`来判断是否存在继承。如果`std::is_base_of(T1,T2)`是`true`，则代表`T2`派生自`T1`（即：T1 is base of T2）。类型也可以被认为从他们自己派生。因此，我们可以直接使用`std::is_base_of`来代替`std::is_same`就可以了：
+
+```c++
+//C++11版本
+class Person {
+public:
+    template<
+        typename T,
+        typename = typename std::enable_if<
+                       !std::is_base_of<Person, 
+                                        typename std::decay<T>::type
+                                       >::value
+                   >::type
+    >
+    explicit Person(T&& n);
+    …
+};
+//也可以使用C++14的别名模板来简化代码
+class Person  {                                         //C++14
+public:
+    template<
+        typename T,
+        typename = std::enable_if_t<                    //这儿更少的代码
+                       !std::is_base_of<Person,
+                                        std::decay_t<T> //还有这儿
+                                       >::value
+                   >                                    //还有这儿
+    >
+    explicit Person(T&& n);
+    …
+};
+```
+
+至此，如果构造函数中需要解决和`logAndAdd`中的问题一样，我们只需要结合使用两种方法即可：
+
+```c++
+class Person {
+public:
+    template<
+        typename T,
+        typename = std::enable_if_t<
+            !std::is_base_of<Person, std::decay_t<T>>::value
+            &&
+            !std::is_integral<std::remove_reference_t<T>>::value
+        >
+    >
+    explicit Person(T&& n)          //对于std::strings和可转化为
+    : name(std::forward<T>(n))      //std::strings的实参的构造函数
+    { … }
+
+    explicit Person(int idx)        //对于整型实参的构造函数
+    : name(nameFromIdx(idx))
+    { … }
+
+    …                               //拷贝、移动构造函数等
+
+private:
+    std::string name;
+};
+```
+
+最后需要提及的是，前三种方法虽然比较“笨拙”且综合性能不好，但是如果出现特殊类型，如`char16_t`的字符串
+
+```c++
+Person p(u"Konrad Zuse");   //“Konrad Zuse”由const char16_t类型字符组成
+```
+
+前三种方法编译器会很清楚的报告，表示没有可以从`const char16_t[12]`转换为`int`或者`std::string`的方法。但是后两种就比较头疼了，至少是上百行的错误信息（模板元编程的经典特征，报错你看不懂）。
