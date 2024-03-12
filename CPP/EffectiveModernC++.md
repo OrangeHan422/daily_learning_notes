@@ -2435,3 +2435,116 @@ Person p(u"Konrad Zuse");   //“Konrad Zuse”由const char16_t类型字符组�
 ```
 
 前三种方法编译器会很清楚的报告，表示没有可以从`const char16_t[12]`转换为`int`或者`std::string`的方法。但是后两种就比较头疼了，至少是上百行的错误信息（模板元编程的经典特征，报错你看不懂）。
+
+### 条款28：理解引用折叠
+
+总结就一句话：只有右值和右值引用推导为右值引用，其他均推导为左值引用
+
+### 条款29：认识移动操作的确定
+
+第一点是代码历史遗留问题，对于一些旧式C++的代码风格，大多遵守的是三原则(rule of three)，或者自定义了一些默认函数，导致编译器无法自动生成移动函数，因此很多可以移动的操作，仍然执行的复制操作。
+
+第二个是问题是：一些类的移动并不是单单“像移动一个指针”一样快。最经典的例子是`std::array`，内部并不是存储一个指针，而是将所有数据存在了对象中，这样对`std::array`对象进行移动的时候，依旧会对每个对象进行移动，远没有我们期待的那样：“将对象的指针移动一下”就好了。
+
+第三个问题：对于`std::string`，许多字符串的实现采用了小字符串优化(*small string optimization*，SSO)。小字符串指的是类似长度小于15字符这种，都是存储在了`std::string`的缓冲区中，而没有存储在堆内存，移动这种字符串的速度并不比复制快。
+
+### 条款30：熟悉完美转发失败的情况
+
+完美转发意味着我们不仅转发对象，还要转发对象的显著特征：类型，左值还是右值，以及CV特性。因此，很容易和通用引用结合使用。
+
+```c++
+template<typename... Ts>
+void fwd(Ts&&... params)            //接受任何实参
+{
+    f(std::forward<Ts>(params)...); //转发给f
+}
+```
+
+给定我们的目标函数`f`和转发函数`fwd`，如果`f`使用某特定实参会执行某个操作，但是`fwd`使用相同的实参会执行不同的操作，完美转发就会失败
+
+#### 花括号初始化
+
+```c++
+void f(const std::vector<int>& v);
+f({ 1, 2, 3 });         //可以，“{1, 2, 3}”隐式转换为std::vector<int>
+fwd({ 1, 2, 3 });       //错误！不能编译
+```
+
+该问题的错误原因：在`f`函数的调用时，接收到初始化列表作为参数，编译器会和声明的形参进行对比，从而将初始化列表用作`vector`的初始化。而使用`fwd`间接调用f函数的时候，会先进行**类型推导**，但是类型推导拒绝推导`std::initializer_list`类型。因此对于`fwd`函数的类型推导被阻止，编译器就拒绝该调用。
+
+因为`auto`是可以推导出`std::initializer_list`的，所以提供一种简单的解决方法：
+
+```c++
+auto il = { 1, 2, 3 };  //il的类型被推导为std::initializer_list<int>
+fwd(il);                //可以，完美转发il给f
+```
+
+#### 0或者NULL作为空指针
+
+仍旧是旧式代码的问题，在类型推导时，会推导为`int`，然后对`int`完美转发。解决方法还是将`0`或者`NULL`代表的空指针替换为`nullptr`
+
+#### 仅有声明的static const数据成员
+
+对于仅有声明的static const数据成员，即在声明时赋值：
+
+```c++
+class Widget {
+public:
+    static const std::size_t MinVals = 28;  //MinVal的声明
+    …
+};
+…                                           //没有MinVals定义
+
+std::vector<int> widgetData;
+widgetData.reserve(Widget::MinVals);        //使用MinVals
+```
+
+这样做可以通过编译，但是有些编译器并不会为`static const`数据成员分配内存，而是直接在使用的地方替换为其声明值。这样做的问题是，当你需要对`static const`成员取地址的时候，就会出现编译报错。而通用引用中的引用，在二进制文件中，可以看做就是一个指针。
+
+解决方法就是，将声明和定义分开（即使你的编译器支持上述形式）。即，在源文件中对`static const`进行定义。
+
+#### 当遇到重载函数
+
+考虑下属情形：
+
+```c++
+void f(int (*pf)(int));             //pf = “process function”
+void f(int pf(int));                //与上面定义相同的f
+
+//现在有重载的函数
+int processVal(int value);
+int processVal(int value, int priority);
+
+f(processVal);                      //可以
+fwd(processVal);                    //错误！那个processVal？
+```
+
+这个错误的原因和花括号初始化的原因类似。在直接调用`f`函数的时候，会根据形参来进行函数决议。但是在通用类型推导的时候，没有这些信息。
+
+同样的，对于模板函数，该问题也存在（因为一个模板函数代表的是一个函数族）：
+
+```c++
+template<typename T>
+T workOnVal(T param)                //处理值的模板
+{ … }
+
+fwd(workOnVal);                     //错误！哪个workOnVal实例？
+```
+
+解决方法是声明参数的类型，或者进行强制转换：
+
+```c++
+using ProcessFuncType =                         //写个类型定义；见条款9
+    int (*)(int);
+
+ProcessFuncType processValPtr = processVal;     //指定所需的processVal签名
+
+fwd(processValPtr);                             //可以
+fwd(static_cast<ProcessFuncType>(workOnVal));   //也可以
+```
+
+但是这么做就比较“脱裤子放屁”，我使用完美准发就是为了“无脑”转发任何类型，这里我需要直到具体的转发类型，还要转换，那还完美什么。
+
+#### 位域
+
+和底层有关，C++无法指定一个引用或指针指向`bit`
