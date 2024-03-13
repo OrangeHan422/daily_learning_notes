@@ -2548,3 +2548,319 @@ fwd(static_cast<ProcessFuncType>(workOnVal));   //也可以
 #### 位域
 
 和底层有关，C++无法指定一个引用或指针指向`bit`
+
+## 第六章 Lambda表达式
+
+简单回顾一个lambda表达式：
+
+```c++
+std::find_if(container.begin(), container.end(),
+             [](int val){ return 0 < val && val < 10; });  
+```
+
+术语解释：
+
++ **闭包**(enclosure)是lambda创建的运行时的对象。依赖捕获模式，闭包持有被捕获数据的副本或者引用。在上述`std::find_if`调用中，闭包作为第三个参数传入`std::find_if`
++ **闭包类**(closure class)是从中实例化闭包的类。每个lambda都会使编译器生成唯一的闭包类。lambda中的语句成为其闭包类的成员函数中的可执行指令
+
+闭包一般可以被拷贝，所以可能有多个闭包对应一个lambda。如：
+
+```c++
+{
+    int x;                                  //x是局部对象
+    …
+
+    auto c1 =                               //c1是lambda产生的闭包的副本
+        [x](int y) { return x * y > 55; };
+
+    auto c2 = c1;                           //c2是c1的拷贝
+
+    auto c3 = c2;                           //c3是c2的拷贝
+    …
+}
+```
+
+`c1`，`c2`，`c3`都是*lambda*产生的闭包的副本。
+
+如果简单的使用lambda，这些概念是不必要的。但是如果深入研究，区分什么存在于编译期（*lambdas* 和闭包类），什么存在于运行时（闭包）以及它们之间的相互关系是重要的。
+
+> 一刷理解：闭包可以看做多态中的对象，其作用主要在运行期间发挥。而闭包类则顾名思义，就是一个类，起作用在编译期发挥。
+
+### 条款31：避免使用默认的捕获模式
+
+C++11两种默认的捕获模式：按引用捕获和按值捕获。按引用捕获可能带来悬空引用的问题。那直接按值捕获不就可以解决悬空引用的问题了吗？答案是否定的，并且按值捕获还会让你以为你的闭包是独立的（事实上也不是独立的）。
+
+首先是按引用捕获的问题：如果引用对象是局部的，而闭包的声明周期超过了被引用对象的声明周期，就会出现悬空引用。考虑以下情形：
+
+```c++
+//vector中的元素都是可调用对象。返回值为bool，参数为int
+using FilterContainer = std::vector<std::function<bool(int)>>;  
+
+FilterContainer filters;                    //过滤函数
+
+//添加一个可调用对象，用来过滤5的倍数
+filters.emplace_back(                       
+    [](int value) { return value % 5 == 0; }
+);
+//但是实际上我们可能不止需要过滤5的倍数，即除数可能需要外界传入
+void addDivisorFilter()
+{
+    auto calc1 = computeSomeValue1();
+    auto calc2 = computeSomeValue2();
+
+    auto divisor = computeDivisor(calc1, calc2);
+
+    filters.emplace_back(                               //危险！对divisor的引用
+        [&](int value) { return value % divisor == 0; } //将会悬空！
+    );
+    //即使显式捕获变量引用也不行
+    filters.emplace_back(
+        [&divisor](int value) 			    //危险！对divisor的引用将会悬空！
+        { return value % divisor == 0; }
+    );
+}
+```
+
+上述的问题显而易见，divisior的生命周期仅存在该函数栈中，但是filter的生命周期大于该函数栈，而捕获的形式是引用，所以在函数结束后，引用就悬空了。
+
+> 该条款没有提供任何**解决**上述描述的两个问题，只是建议捕获列表将需要捕获的变量写出来（如`[&divisor]`）,这样能帮助自己观察是否出现了引用悬空的情况
+
+另一个值得总结的是，**lambda表达式只能捕获局部变量和函数形参！**
+
+错误实例，使用类内成员：
+
+```c++
+//类定义
+class Widget {
+public:
+    …                       //构造函数等
+    void addFilter() const; //向filters添加条目
+private:
+    int divisor;            //在Widget的过滤器使用
+};
+//函数实现1
+void Widget::addFilter() const
+{
+    filters.emplace_back(
+        [divisor](int value)                //错误！没有名为divisor局部变量可捕获
+        { return value % divisor == 0; }
+    );
+}
+
+//函数实现2
+void Widget::addFilter() const
+{
+    //使用默认的值捕获，错误（可以通过编译，但是有大问题），局部变量和形参都是空的，所以该捕获列表仅仅捕获到了一个this！！！
+    //至于为什么匿名函数内的divisior没有报错，是因为编译器默认添加了this
+    filters.emplace_back(
+        [=](int value) { return value % divisor == 0; }
+    );
+}	
+//上述函数的编译器展开版本
+void Widget::addFilter() const
+{
+    auto currentObjectPtr = this;
+
+    filters.emplace_back(
+        [currentObjectPtr](int value)
+        { return value % currentObjectPtr->divisor == 0; }
+    );
+}
+```
+
+上述版本看似可以使用，但是任然存在悬空问题：
+
+```c++
+using FilterContainer = 					//跟之前一样
+    std::vector<std::function<bool(int)>>;
+
+FilterContainer filters;                    //跟之前一样
+
+void doSomeWork()
+{
+    auto pw =                               //创建Widget；std::make_unique
+        std::make_unique<Widget>();         //见条款21
+
+    pw->addFilter();                        //添加使用Widget::divisor的过滤器
+
+    …
+}                                           //销毁Widget；filters现在持有悬空指针！
+```
+
+解决方法是添加一个局部变量，再使用值捕获：
+
+```c++
+void Widget::addFilter() const
+{
+    auto divisorCopy = divisor;                 //拷贝数据成员
+
+    filters.emplace_back(
+        [=](int value)                          //捕获副本
+        { return value % divisorCopy == 0; }	//使用副本
+    );
+}
+
+//C++14也可以这样
+void Widget::addFilter() const
+{
+    filters.emplace_back(                   //C++14：
+        [divisor = divisor](int value)      //拷贝divisor到闭包
+        { return value % divisor == 0; }	//使用这个副本
+    );
+}
+```
+
+再次强调：**lambda表达式只能捕获局部变量和函数形参！**
+
+需要注意的另一个情况是局部`static`变量
+
+```c++
+void addDivisorFilter()
+{
+    static auto calc1 = computeSomeValue1();    //现在是static
+    static auto calc2 = computeSomeValue2();    //现在是static
+    static auto divisor =                       //现在是static
+    computeDivisor(calc1, calc2);
+
+    filters.emplace_back(
+        [=](int value)                          //什么也没捕获到！
+        { return value % divisor == 0; }        //引用上面的static
+    );
+
+    ++divisor;                                  //调整divisor
+}
+```
+
+条款的核心是：**lambda表达式只能捕获局部变量和函数形参！**（重要的事情说三遍，所有的生命周期问题都可以从这里出发分析）
+
+### 条款32：使用初始化捕获来移动对象到闭包中
+
+前言：C++11无法完美实现，但是C++14可以实现。
+
+C++14提供了**初始化捕获**，初始化捕获的另一个名称是**通用\*lambda\*捕获**（*generalized lambda capture*），使用初始化捕获可以让你指定：
+
++ 从lambda生成的闭包类中的数据成员名称
++ 初始化该成员的表达式
+
+我们直到`std::unique_ptr`只支持移动而不支持复制，所以以下是一个简单的将`std::unique_ptr`移动到闭包的方法：
+
+```c++
+class Widget {                          //一些有用的类型
+public:
+    …
+    bool isValidated() const;
+    bool isProcessed() const;
+    bool isArchived() const;
+private:
+    …
+};
+
+auto pw = std::make_unique<Widget>();   //创建Widget；使用std::make_unique
+                                        //的有关信息参见条款21
+
+…                                       
+
+auto func = [pw = std::move(pw)]        //使用std::move(pw)初始化闭包数据成员
+            { return pw->isValidated()
+                     && pw->isArchived(); };
+
+//如果不需要对唯一指针管理的内容进行更改，也可以直接创建临时对象来使用lambda的初始化捕获
+auto func = [pw = std::make_unique<Widget>()]   //使用调用make_unique得到的结果
+            { return pw->isValidated()          //初始化闭包数据成员
+                     && pw->isArchived(); };
+```
+
+“`=`”的左侧是指定的闭包类中数据成员的名称，右侧则是初始化表达式。有趣的是，“`=`”左侧的作用域不同于右侧的作用域。左侧的作用域是闭包类，右侧的作用域和*lambda*定义所在的作用域相同
+
+注意，开始说的C++11无法做到，指的是C++11使用lambda无法做到。但是你完全可以使用一个可调用类来实现（联想工作中自定义的CA2W类）：
+
+```c++
+class IsValAndArch {                            //“is validated and archived”
+public:
+    using DataType = std::unique_ptr<Widget>;
+    
+    explicit IsValAndArch(DataType&& ptr)       //条款25解释了std::move的使用
+    : pw(std::move(ptr)) {}
+    
+    bool operator()() const
+    { return pw->isValidated() && pw->isArchived(); }
+    
+private:
+    DataType pw;
+};
+
+auto func = IsValAndArch(std::make_unique<Widget>());
+```
+
+如果坚持C++11使用lambda函数实现移动语义，因为可以考虑使用`std::bind`来帮忙：
+
+```c++
+std::vector<double> data;           
+
+…                                     
+
+auto func =
+    std::bind(                              //C++11模拟初始化捕获
+        [](const std::vector<double>& data) 
+        { /*使用data*/ },
+        std::move(data)   //注意，这里是bind的参数                  
+    );
+```
+
+对于`std::bind`,每个左值实参都是复制构造的，每个右值实参都是移动构造的。
+
+总结下来，使用`std::bind`解决C++11lambda无法移动构造的要点：
+
+- 无法移动构造一个对象到C++11闭包，但是可以将对象移动构造进C++11的bind对象。
+- 在C++11中模拟移动捕获包括将对象移动构造进bind对象，然后通过传引用将移动构造的对象传递给*lambda*。
+- 由于bind对象的生命周期与闭包对象的生命周期相同，因此可以将bind对象中的对象视为闭包中的对象。
+
+### 条款33：对于auto&&形参使用decltype以std::forward它们
+
+在C++14中，lambda中的参数可以支持auto：即在闭包类中的`operator()`函数是一个函数模板：
+
+```c++
+auto f = [](auto x){ return func(normalize(x)); };
+//就相当于
+class SomeCompilerGeneratedClassName {
+public:
+    template<typename T>                //auto返回类型见条款3
+    auto operator()(T x) const
+    { return func(normalize(x)); }
+    …                                   //其他闭包类功能
+};
+```
+
+这样的问题是，如果normalize对待左值和右值的方式不同，这里就不合适了。因为不管左值还是右值作为匿名函数的实参，最终传入normalize的都是左值。
+
+为了解决这个问题，应该将参数作为通用引用，并且使用完美转发：
+
+```c++
+auto f = [](auto&& x)
+         { return func(normalize(std::forward<???>(x))); };
+```
+
+这里存在另一个问题，如何确定`auto`的类型并传递给forward呢？答案是`decltype`:递给*lambda*的是一个左值，`decltype(x)`就能产生一个左值引用；如果传递的是一个右值，`decltype(x)`就会产生右值引用:
+
+```c++
+auto f =
+    [](auto&& param)
+    {
+        return
+            func(normalize(std::forward<decltype(param)>(param)));
+    };
+```
+
+同样的也可以拓展到可变参数包（毕竟只是一个模式）：
+
+```c++
+auto f =
+    [](auto&&... params)
+    {
+        return
+            func(normalize(std::forward<decltype(params)>(params)...));
+    };
+```
+
+
+
