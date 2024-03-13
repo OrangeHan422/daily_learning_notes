@@ -1181,3 +1181,299 @@ string &&getText() &&
 为将实现和接口分离，另一种方法是使用抽象接口以及实现该接口的实现类，抽象接口是只有纯虚函数的接口。
 
 ### ch10 揭秘继承技术
+
+#### 10.1 使用继承构建类
+
+派生类“**是一个**”基类
+
+##### 10.1.1 扩展类
+
+指向Base对象的指针可以指向Derived对象，对于引用也是如此。但是客户只能访问基类的方法和成员。
+
+C++允许将类标记为`final`，这意味着继承这个类会导致编译报错。
+
+##### 10.1.2 重写方法
+
+>  一旦将方法或者析构函数标记为`virtual`，他们在所有的派生类都是`virtual`，即使没有标明。
+
+> 对象本身“知道”自己所属的类，因此，只要这个方法声明为`virtual`，就会自动调用对应的方法（即多态）。比如基类对象的引用实际引用了派生类的对象，那么调用虚函数就会调用派生类的函数。
+>
+> 但是需要注意的是，即使基类指针或者引用知道自己指向的是一个派生类，也无法访问没有在基类定义的方法或者成员。
+
+>  好习惯是在重写虚函数的时候都加上`override`函数，这样在重写的时候可以避免很多问题。比如，如果加上`override`关键字，在派生类将参数类型改变的时候就会报错，但是没有该关键字就会创建一个新的虚函数。
+
+> 重写非虚函数，会“隐藏”基类定义的方法，并且重写的这个方法只能在派生类环境中使用。
+
+> C++在编译类的时候，会创建一个包含类中所有方法的二进制对象。
+>
+> 在非虚情况下，将控制交个正确方法的代码是硬编码，此时根据的是编译期的类型调用方法。称之为“静态绑定”或者“早绑定”
+>
+> 在虚函数的情况下，会使用虚表(vtable)来调用正确的实现。即每个拥有虚函数的类都有一张虚表，每个对象都包含指向虚表的指针。当某个对象调用方法时，指针进入虚表，根据实际的对象类型在运行时执行正确的方法。称之为“动态绑定”或“晚绑定”
+
+> 存在虚函数的基类，都需要将析构函数声明为`virtual`《Effective C++》
+>
+> 除非这个类是`final`类
+
+#### 10.3 利用父类
+
+##### 10.3.4 向上转型和向下转型
+
+如果直接使用派生类初始化基类对象，会发生截断
+
+正确做法应该是使用基类的引用或者指针绑定到派生类。称之为向上转型
+
+反之，将基类转换为派生类称之为向下转型，这种做法不被推荐。如果确实需要，应该使用`dynamic_cast`进行转换。注意：向下转换是设计不良的标志。
+
+#### 10.4 继承与多态性
+
+纯虚函数的定义是在方法声明后加上`=0`
+
+对于同辈的对象之间的拷贝构造，拷贝构造函数需要显示声明：
+
+```c++
+//  StringSpreadsheetCell ---inherit--->SpreadsheetCell<----inherit---DoubleSpreadsheetCell
+export class StringSpreadsheetCell:public SpreadsheetCell
+{
+    public:
+    	StringSpreadsheetCell() = default;
+    	StringSpreadsheetCell(const DoubleSpreadsheetCell &cell)
+            :m_value(cell.getString())
+        {}
+};
+```
+
+#### 10.6 有趣而晦涩的继承问题
+
+##### 10.6.1 修改重写方法的返回类型
+
+经验之谈的话，重写方法要使用于基类一直的方法声明。实现可以改变，但是原型保持不变。
+
+但是事实并非如此，在C++中，如果原始的饭后类型是某个类的指针或者引用，重写的方法可以将返回类型改为派生类的指针或者引用。这种类型称之为协变返回类型(covariant return types)。示例：
+
+```c++
+/*class Cherry		class CherryTree
+		^					^
+		|					|
+  class BingCherry	class BingCherryTree*/
+
+//假设Tree都有虚方法pick()
+Cherry* CherryTree::pick(){return new Cherry();}
+//这种重写是允许的，因为多态的向上转换是可以的，但是返回类型不能是其他诸如void *的类型
+BingCherry* BinCherryTree::pick()
+{
+    auto theCherry{make_unique<BingCherry>()};
+    //do something...
+    return theCherry.release();
+}
+
+//实际使用
+BingCherryTree theTree;
+//注意这里返回的是BingCherry，但是可以正常运，因为这里存在多态的向上转换
+unique_ptr<Cherry> theCherry{theTree.pick()};
+theCherry->printType();
+```
+
+##### 10.6.2 派生类中添加虚基方法的重载
+
+> 这种情况比较少见：使用虚基类中的虚方法，在派生类中重新定义一个重载版本的虚函数。可以使用using解决该问题
+
+```c++
+class Base
+{
+    public:
+    	virtual void func();
+};
+
+class Derived:public Base
+{
+    public:
+    	using Base::func;
+    	virtual void func(int i);
+};
+```
+
+##### 10.6.3 继承的构造函数
+
+因为派生类和基类中数据成员可能存在不同，所以基类构造函数是不可以在派生类直接使用的，因为可能存在未定义行为。如果确定没有未定义行为，可以使用`using Base::Base`形式允许派生类直接使用基类的构造函数。
+
+```c++
+class Base
+{
+    public:
+    	Base() = default;
+    	Base(std::string_view str);
+    	virtual ~Base() = default;
+};
+
+class Derived:public Base
+{
+    public:
+    	using Base::Base;
+    	Derived(int i);
+};
+
+Base base{"hello"};	//OK
+Derived d1{1};		//OK
+Derived d2{"hello"};//OK only if using Base::Base is declared
+Derived d3;			//ERROR,no default ctor declared
+```
+
+需要注意的是，如果派生类重写了基类构造函数（即参数一致），和所有重写一样，派生类的构造函数优先级会更高。
+
+另一点需要注意的是，不可以只继承一部分的基类构造函数，如果继承，会继承除了默认构造函数以外的所有构造函数。
+
+如果两个基类存在相同的参数列表版本的构造函数，就不能继承，因为会存在歧义。正确做法是派生类自己声明这样的构造函数（即隐藏基类的构造函数）
+
+##### 10.6.4 重写方法时的特殊情况
+
+在C++中静态方法是不能重写的。即使派生类的静态方法和基类中的静态方法声明完全一致，也是两个独立的函数。因为静态方法仅和类相关，和对象类型无关：
+
+```c++
+Derived d;
+Base& ref{d};
+d.staticFunc();		//call Derived staticFunc();
+ref.staticFunc();	//call Based staticFunc();
+```
+
+>  实际还是静态类型和动态类型的关系:
+>
+> 静态类型都是在编译期确定，和类相关
+>
+> 动态类型是在运行期确定，和对象的实际类型有关
+
+当重写某个方法时，编译器会隐式地隐藏基类中同名方法的所有其他实例。即：如果重写了给定名称的某个方法，应该重写所有同名方法，否则应该当做错误处理。如：
+
+```c++
+class Base
+{
+    public:
+    	virtual void overload(){cout << "Base overload()" << endl;}
+    	virtual void overload(int i){cout << "Base overload(int i)" << endl;}
+    	virtual ~Base() = default;
+};
+
+class Derived:public Base
+{
+    public:
+    	void overload() override{
+            cout <<"Drived overload()" << endl;
+        }
+};
+
+//此时使用Derived对象就无法调用基类的有参版本的overload函数
+Derived d;
+d.overload(2);//ERROR
+
+//只能通过多态进行使用
+Base& ref{d};
+ref.overload(2);//OK
+```
+
+即如果重写拥有重载版本的方法，派生类仅存在已经重写的版本，对于没有重写的版本是没有继承的。所以要么对所有的重载版本进行重写，要么使用`using Derived::overload()`然后重写特定版本。
+
+> 可以理解为虚函数中继承一般只看名称。对于多态的步骤应该是：
+>
+> + 运行时确定对象类型
+> + 到虚表中通过函数名称，确定对应的虚函数是派生类的虚函数还是基类的虚函数
+> + 在派生类或者基类寻找对应重载版本
+
+最后一个比较有趣的例子，来加深静态和动态的理解：即存在默认参数的虚函数
+
+```c++
+class Base
+{
+    public:
+    	virtual void go(int i = 2){cout << "Base go:" << i << endl;}
+    	virtual ~Base() = default;
+};
+
+class Derived:public Base
+{
+    public:
+		virtual void go(int i = 7){cout << "Derived go:" << i << endl;}
+};
+
+//有趣的东西
+Base b;
+Derived d;
+Base& bRef{d};
+
+b.go();		//Base go:2
+d.go();		//Derived go:7
+bRef.go();	//Derived go:2----------->hahaha
+//个人理解：
+//默认参数是静态检查确定的，即编译期确定了默认参数，而编译期是通过类类型确定。
+//而具体的虚函数则是动态检查确定的，即运行时确定使用派生类的函数还是基类的函数，即运行时通过对象类型确定的
+//对于该例子中，首先bRef在编译期根据类类型确定为Base，所以确定了默认参数为2
+//然后再运行时，bReg引用的对象类型为Derived，所以确定了虚函数应该使用Derived中的虚函数，即Derived go
+//综上，将函数和参数结合，bRef.go()输出：Derived go:2
+```
+
+##### 10.6.6 运行时类型工具
+
+在C++中提供了对象的运行时的特性集，即运行时类型信息(Run Time Type Information,RTTI)的特性集。`dynamic_cast()`就属于该特性集。
+
+另一个特性(在源码中见到过)，就是`typeid`运算符，这个运算符可以在运行时查询对象。示例：
+
+```c++
+import <typeinfo>;
+
+class Animal{public:virtual ~Animal() = default;};
+class Dog:public Animal{};
+class Bird:public Animal{};
+
+
+void speak(const Animal& animal){
+    if(typeid(animal) == typeid(Dog)){
+        cout << "Woof!" << endl;
+    }else if(typeid(animal) == typeid(Bird)){
+        cout << "Chirp!" << endl;
+    }
+}
+```
+
+注意，至少有一个虚函数，`typeid`运算符才能正常运行(毕竟是运行时，所有多态都涉及运行时的类型检查（至少目前所学的是这样的）)。另外`typeid`也会去除引用和CV限定
+
+在大多数情况下，都应该考虑使用虚函数替换`typeid`，比如上例中可以定义虚函数`speak()`在基类中，然后再派生类进行重写。
+
+`typeid`最有用的应该是日志系统中，或者帮助调试的时候。
+
+#### 10.7 类型转换
+
+##### 10.7.1 static_cast()
+
+C++类型规则技术上允许的转化都可以使用
+
+##### 10.7.2 reinterpret_cast()
+
+比`static_cast()`功能更大，但是“能力越大，责任越大”，强转以为着突破规则限制，这时候可能出现的内存问题或其他问题就只能靠自己了。（使用实例可以回想自己工作中修改LiteZip源码，统一文件句柄时，将`void *`转换为`int`的操作）
+
+##### 10.7.3 std::bit_cast()
+
+对于不同类型的对象，进行位级别的复制。（联想工作中数据库中的二进制数据存储结构体的例子）
+
+##### 10.7.4 dynamic_cast()
+
+主要用于类型检查，尤其在向下转换时，即基类向派生类转换时（注意，这是十分不好的设计）
+
+```c++
+Base* pBase;
+Derived* pDerived{new Derived()};
+pBase = pDerived;//派生类向基类转化，向上转换，没有问题
+pDerived = dynamic_cast<Derived *>(pBase);//向下转换，如果失败会返回空指针，对于引用会抛出异常
+```
+
+##### 10.7.5 类型转换总结
+
+| 场景                                                   | 类型转换                            |
+| ------------------------------------------------------ | ----------------------------------- |
+| 移除const属性                                          | const_cast()                        |
+| 语言支持的显示转化                                     | static_cast()                       |
+| 用户定义的构造函数或者转换函数支持的显式强制转换       | static_cast()                       |
+| 一个类的对象转换为无关的类对象                         | bit_cast()                          |
+| 在同一继承层次结构中，一个类的指针转换为另一个类的指针 | 建议dynamic_cast()，或static_cast() |
+| 在同一继承层次结构中，一个类的引用转换为另一个类的引用 | 建议dynamic_cast()，或static_cast() |
+| 执行一中类型的指针转换为指向其他不相关类型的指针       | reinterpret_cast()                  |
+| 一种类型的引用转换为其他不相关类型的引用               | reinterpret_cast()                  |
+| 指向函数的指针转换为指向函数的指针                     | reinterpret_cast()                  |
+
