@@ -1477,3 +1477,372 @@ pDerived = dynamic_cast<Derived *>(pBase);//向下转换，如果失败会返回
 | 一种类型的引用转换为其他不相关类型的引用               | reinterpret_cast()                  |
 | 指向函数的指针转换为指向函数的指针                     | reinterpret_cast()                  |
 
+### ch12 利用模板编写泛型代码
+
+#### 12.2 类模板
+
+##### 12.2.1编写类模板
+
+重要回顾：
+
++ rule of five
+
++ 成员函数const和非const使用Scott Meyer的const_const以及as_const避免代码重复：
+
+  ```c++
+  //对于任何已经定义了const版本的成员函数，可以如此书写非const版本
+  template<typename T>
+  T& ClassName::func()
+  {
+      return const_cast<T&>(as_const(*this).m_data)
+  }
+  ```
+
++ `std::optional`的使用。加入在vector中存储具体的类型，则不能存储真正意义的空值，但是optional可以：
+
+  ```c++
+  vector<vector<std::optional<T>>> m_data;
+  
+  //使用
+  std::optional<T>& at(size_t x,size_t y);
+  
+  auto res = at(1,2).value_or(0);//如果存在值，返回值，否则返回value_or指定的值
+  //其他使用：
+  at(1,2).value();
+  at(1,2).has_value();
+  ```
+
++ 对于模板类，如果使用频繁，可以使用别名优化代码：
+
+  ```c++
+  using IntGrid = Grid<int>;
+  ```
+
+##### 12.2.2 编译器处理模板的原理
+
+  编译器默认仅在类模板方法被实际使用的时候进行实例化，这样做可能存在潜在的危险：有一些类模板方法中存在编译错误，而这些错误会被忽略。解决方法是，通过显式的目标实例化，可以强制编译器为所有的方法生成代码：
+
+  ```c++
+  template class Grid<int>;
+  ```
+
+  C++20也引入了概念，可以对模板的实例化进行一定的限制，并返回更可读的编译错误信息。
+
+  ##### 12.2.4 模板参数
+
+  非类型的模板参数只能是整数类型(char,int,long等)，枚举类型，指针，引用，`std::nullptr_t`，`auto`，`auto&`和`auto*`。从C++20开始，允许浮点型。
+
+  非类型模板参数不能通过非常量的整数指定，如：
+
+  ```c++
+  template <typename T,size_t WIDTH,size_t HEIGHT>
+  class Grid{};
+  
+  size_t height{10};
+  Grid<int,10,height> testGrid;//error
+  const size_t height{10};
+  Grid<int,10,height> testGrid;//OK
+  ```
+
+  需要注意的是，如果填加了非类型参数，那么非类型参数也是类类型的一部分，即`Grid<int,10,10>`和`Grid<int,10,11>`是完全不同的两个类型。
+
+  另外，即使为所有模板都提供了默认参数，在声明变量的时候也要加上`<>`:
+
+  ```c++
+  template <typename T = int,size_t WIDTH = 1,size_t HEIGHT = 2>
+  class Grid{};
+  
+  Grid g1;//error
+  Grid<> g2;//OK
+  ```
+
+  用户定义的推导规则（联想工作中自定义系列化类对long的处理）
+
+  ```c++
+  func(long) -> func<int>;//注意前后符号，一个是函数调用运算符，一个是模板声明符号
+  ```
+
+  ##### 12.2.5 方法模板
+
+  模板类中定义模板方法：
+
+  ```c++
+  template <typename T,size_t WIDTH,size_t HEIGHT>
+  class Grid{
+      public:
+      	template<typename E>
+  		Grid(const Grid<E>& src);
+  };
+  
+  
+  //实现：
+  template <typename T>
+  template <typename E>
+  Grid<T>::Grid(const Grid<E>& src)
+      :Grid{src.getWidth(),src.getHeight()}
+  {
+      ...
+  }
+  ```
+
+  ##### 12.2.6 类模板的特化
+
+  编写一个类模板的特化的时候，必须指明这是一个模板，以及正在为哪种特定的类型编写这个模板：
+
+  ```c++
+  template <typename T>
+  class Grid
+  {
+      ...
+  };
+  
+  //特化
+  template <>
+  class Grid<const char *>
+  {
+      ...
+  };
+  ```
+
+  类模板的特化需要将所有的实现重写。
+
+  ##### 12.2.7 从类模板派生
+
+  如果一个派生类从模板本身继承，那么这个派生类也不许是模板
+
+  ```c++
+  template <typename T>
+  class Grid
+  {
+      ...
+  };
+  
+  //继承
+  template <typename T>
+  class GameBoard:public Grid<T>
+  {
+    ...  
+  };
+  ```
+
+  #### 12.3 函数模板
+
+##### 12.3.1 函数模板的重载
+
+理论上C++允许编写函数模板的特化。但是，很少会这么做，因为函数模板的特化不参与重载解析，可能出现意外行为。所以如果函数对特殊类型有要求，那么应该重载(联想工作中的`format(char *)`)
+
+##### 12.3.2 类模板的友元函数模板
+
+需要注意在`operator+`后还有一个`<T>`
+
+```c++
+template <typename T>
+class Grid
+{
+    public:
+    	friend Grid<T> operator+<T>(const Grid&,const Grid&);
+};
+```
+
+##### 12.3.4 函数模板返回类型
+
+从C++14开始，支持推导函数的返回值类型，即下述函数是可以的：
+
+```c++
+template <typename T1,typename T2>
+auto add(const T1&,const T2&);
+```
+
+但是注意，`auto`在类型推导时，“几乎”和模板类型推导一致(《Effective Mordern C++》)。所以这样的返回值会去除引用以及CV限定。如果需要保留这些，应该使用`decltype()`，如：
+
+```c++
+template <typename T1,typename T2>
+decltype(auto) add(const T1&,const T2&);
+```
+
+注意，上述都是在C++14才允许的，如果在C++11中，只能使用后置函数返回类型进行模拟：
+
+```c++
+template <typename T1,typename T2>
+auto add(const T1& t1,const T2& t2) -> decltype(t1+t2)
+{
+    return t1+t2;
+}
+```
+
+#### 12.5 概念（C++20）
+
+C++20引入了概念(concept)，一种用来约束类模板和函数模板的模板类型和非类型参数的命名要求。这些是作为谓词编写的，在编译期计算这些谓词，以验证传递给模板的模板参数。概念的主要目标是使与模板相关的编译错误更具有可读性。
+
+说人话：概念，包括后续提到的要求，都可以看做一个函数：这个函数要么是尝试执行一些操作，来验证推导出的类型是否可以支持这些操作（即要求(requires)的作用）;要么通过标准库提供的诸如`derived_from`，`convertible_to`等返回一个严格的布尔值。
+
+需要注意的是：编写概念的时候，需要确保是在为语义建模，而不仅仅是语法建模（语法支持的不一定是你想要的）
+
+##### 12.5.1 语法
+
+```c++
+template <parameter-list>
+concept concept-name = constraints-expression;
+```
+
+可以类比声明一个函数对象来接收匿名函数来记忆，其中`concept`代表函数类型，`constraints-expression`代表匿名函数，但是仅返回bool，而且必须在编译期可以计算出来。
+
+##### 12.5.2 约束表达式
+
+**require表达式**是跟着概念的引入引入的。require也可以看做一个匿名函数，但是只负责执行语句（来确定模板类型是否支持这些语句），没有返回。
+
+###### require表达式
+
+**简单requirement**
+
+就是一个简答你的表达式语句，永远不会计算，编译器值用于验证它是否能通过编译.比如，我们希望推导出的类型支持递增操作：
+
+```c++
+template <typename T>
+concept Incrementable = requires(T x){x++;++x};
+```
+
+**类型**
+
+同上，只不过仅针对类型，就是声明一下类型，看看有没有。比如，下列概念要求推导出的类型要有`value_type`成员：
+
+```c++
+template <typename T>
+concept C = requires{typename T::value_type;};
+```
+
+**复合requirement**
+
+就是简单requirement里面通过`{}`分成几个块，然后每个块可以添加一些操作，比如：
+
+```c++
+template <typename T>
+concept Comparable = requires(const T a,const T b){
+    { a == b;} -> convertible_to<bool>;//convertible_to<From,To>,{}中的结果会直接传递给From
+    {a.swap(b)} noexcept;
+};
+```
+
+上述的复合requirement就是要求：
+
++ `T`可以支持`==`,并且结果是`bool`类型
++ `T`支持`swap`方法，并且是不抛出异常的
+
+###### 组合概念
+
+概念表达式也支持`&&`和`||`：
+
+```c++
+template <typename T>
+concept IncreAndDecre = Incrementable<T> &&Decrementable<T>;
+```
+
+##### 12.5.3 预定义的标准概念
+
+标准库定义了一些预定义的概念：
+
++ 核心语言概念：`same_as`、`derivecd_from`、`convertible_to`、`integral`、`floating_point`、`copy_constructible`
++ 比较概念：`equality_comparable` 、`totaly_ordered`
++ 对象概念：`movable`、`copyable`
++ 可调用的概念：`invocable`、`predicate`
+
+使用示例：
+
+```c++
+//T是否是Foo的派生类
+template <typename T>
+concept IsDerivedFrom = derived_from<T,Foo>;
+//T是否可以转换为bool
+template <typename T>
+concept IsConvertibleToBool = convertible_to<T,bool>;
+//T是否可以默认构造和拷贝构造
+template <typename T>
+concept DefaultAndCopyConstructible = default_initializable<T> && copy_constructible<T>;
+```
+
+##### 12.5.4 类型约束的auto
+
+> auto在很多的放的原则和模板是一样的《Effective Mordern C++》
+
+```c++
+Incrementable auto value{1};//OK
+Incrementable auto value{"abc"s};//error,string不支持递增操作
+```
+
+##### 12.5.5 类型约束和函数模板
+
+**方式一**
+
+直接加在`template<>`中：
+
+```c++
+template <convertible_to<bool> T>//T必须可以转换为bool
+void handle(const T& t);
+
+template <Incrementable T>//T必须可以递增
+void process(const T& t);
+```
+
+**方式二**
+
+个人更喜欢，因为和概念声明形式比较统一
+
+```c++
+template <typename T>
+requires const_expression  //注意，没有;
+void process(const T& t);
+
+//实例
+template <typename T>
+requires requires(T x){++x;x++}  //要求T支持递增操作，再次注意，结尾没有分号！
+void process(const T& t);
+```
+
+**方式三**
+
+在函数头之后指定()，一般在成员方法时使用该形式
+
+```c++
+template <typename T>
+void process(const T& t) requires requires(T x){++x;x++};
+```
+
+**方式四**
+
+更像语法糖，个人不喜欢
+
+```c++
+void process(const Incrementable auto& t);//auto推导出的类型必须可以递增
+```
+
+##### 12.5.6 类型约束和类模板
+
+```c++
+template <typename T>
+requires std::derived_from<T,GamePiece>
+class GameBoard:public Grid<T> {...};
+```
+
+##### 12.5.7 类型约束和类方法
+
+```c++
+template <std::derived_from<GamePiece> T>
+class GameBoard:public Grid<T>
+{
+	public:
+    	void move(size_t xSrc,size_t ySrc,size_t xDest,size_t yDest)
+            requires std::movable<T>;
+};
+
+//实现也要写出requires
+template <std::derived_from<GamePiece> T>
+void GameBoard<T>::move(size_t xSrc,size_t ySrc,size_t xDest,size_t yDest)
+            requires std::movable<T>
+{...}
+```
+
+**总结**
+
++ 对于概念，就是一个函数对象声明并赋值的形式，但是这个值硬性要求为bool，即=后面的函数（或表达式，或requires）必须返回bool。概念后面可以是各种requires。注意结束需要加分号
++ 对于requires，就是编译检查，但是标准库提供了很多封住好的模板。注意单独使用时，结束不需要加分号。但是嵌套在概念中，需要加分号
++ 最后函数决议，有限选择的是限制最少的（为了方便记忆：模板的出现给你提供了极大的自由，在函数决议的时候，编译器也想要自由，所以有限选择限制少的。所以，all is for freedom!!!）
