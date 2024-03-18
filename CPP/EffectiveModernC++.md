@@ -2864,3 +2864,179 @@ auto f =
 
 ### 条款34：优先考虑lambda表达式而非std::bind
 
+假如有一个设置警报器的函数：
+
+```c++
+//一个时间点的类型定义（语法见条款9）
+using Time = std::chrono::steady_clock::time_point;
+
+//“enum class”见条款10
+enum class Sound { Beep, Siren, Whistle };
+
+//时间段的类型定义
+using Duration = std::chrono::steady_clock::duration;
+
+//在时间t，使用s声音响铃时长d
+void setAlarm(Time t, Sound s, Duration d);
+```
+
+在程序某个时刻，我们确定需要设置一个小时后响铃30秒的警报。但是，具体声音未确定。使用lambda的C++11版本以及C++14版本如下：
+
+```c++
+//C++11
+//setSoundL（“L”指代“lambda”）是个函数对象，允许指定一小时后响30秒的警报器的声音
+auto setSoundL =
+    [](Sound s) 
+    {
+        //使std::chrono部件在不指定限定的情况下可用
+        using namespace std::chrono;
+
+        setAlarm(steady_clock::now() + hours(1),    //一小时后响30秒的闹钟
+                 s,                                
+                 seconds(30));
+    };
+
+//C++14可以使用std::literals中的用户自定义字面值简化
+auto setSoundL =
+    [](Sound s)
+    {
+        using namespace std::chrono;
+        using namespace std::literals;      //对于C++14后缀
+
+        setAlarm(steady_clock::now() + 1h,	//C++14写法，但是含义同上
+                 s,
+                 30s);
+    };
+```
+
+如果对`std::bind`了解不深入，那么我们第一反应`std::bind`的等价版本应该如下：
+
+```c++
+using namespace std::chrono;                //同上
+using namespace std::literals;
+using namespace std::placeholders;          //“_1”使用需要
+
+//使用placeholders代替需要传入的参数
+auto setSoundB =                            //“B”代表“bind”
+    std::bind(setAlarm,
+              steady_clock::now() + 1h,     //不正确！见下
+              _1,
+              30s);
+```
+
+但是这里有一个不可忽略的错误。使用`std::bind`时，后续的参数都是作为实参传入首个参数代表的函数的。这也就意味着，在调用`std::bind`的时候，作为实参的参数将被计算。在本例子中就是`steady_clock::now() + 1h`会被计算，这就和我们的需求出现了差异，我们想要的是在调用`setAlarm`函数时计时一小时，然后响铃。而上述`std::bind`版本则是在调用`std::bind`函数时计时一小时，然后响铃。
+
+所以在C++11中需要再嵌套一层`std::bind`，如下：
+
+```c++
+using namespace std::chrono;                //同上
+using namespace std::placeholders;
+auto setSoundB =
+    std::bind(setAlarm,
+              std::bind(std::plus<steady_clock::time_point>(),
+                        std::bind(steady_clock::now),
+                        hours(1)),
+              _1,
+              seconds(30));
+```
+
+此时，匿名函数的优势已经十分明显了，但是还没完。
+
+假如，我们需要重载setAlarm函数，添加上音量参数，那么匿名函数仍可以通过编译，但是`std::bind`则不能：
+
+```c++
+auto setSoundL =                            //和之前一样
+    [](Sound s)
+    {
+        using namespace std::chrono;
+        setAlarm(steady_clock::now() + 1h,  //可以，调用三实参版本的setAlarm
+                 s,
+                 30s);
+    };
+
+
+auto setSoundB =                            //错误！哪个setAlarm？
+    std::bind(setAlarm,
+              std::bind(std::plus<>(),		//C++14 std::plus可以省略模板类型
+                        steady_clock::now(),
+                        1h),
+              _1,
+              30s);
+```
+
+因为`std::bind`的机制是寻找函数名，在填充参数，但是仅通过一个函数名是无法确定使用那个函数的，解决方法是需要将函数名强制转换为我们需要的类型：
+
+```c++
+using SetAlarm3ParamType = void(*)(Time t, Sound s, Duration d);
+
+auto setSoundB =                                            //现在可以了
+    std::bind(static_cast<SetAlarm3ParamType>(setAlarm),
+              std::bind(std::plus<>(),
+                        steady_clock::now(),
+                        1h), 
+              _1,
+              30s);
+```
+
+但是这么做，两者的调用就出现了性能上的差距，需要直到的是这种情况下匿名函数会快过`std::bind`.
+
+考虑一个更简单的实例,判断一个值是否在给定范围内的函数：
+
+```c++
+//匿名函数版本
+auto betweenL =                                 //C++11版本
+    [lowVal, highVal]
+    (int val)
+    { return lowVal <= val && val <= highVal; };
+
+auto betweenL =
+    [lowVal, highVal]
+    (const auto& val)                           //C++14
+    { return lowVal <= val && val <= highVal; };
+
+//std::bind版本
+using namespace std::placeholders;              //同上
+auto betweenB =
+    std::bind(std::logical_and<>(),             //C++14
+              std::bind(std::less_equal<>(), lowVal, _1),
+              std::bind(std::less_equal<>(), _1, highVal));
+
+auto betweenB =
+    std::bind(std::logical_and<bool>(),         //C++11版本
+              std::bind(std::less_equal<int>(), lowVal, _1),
+              std::bind(std::less_equal<int>(), _1, highVal));
+```
+
+另一个问题是，`std::bind`中实参是按值传递还是按引用传递的是十分模糊的，如果想要按引用传递，需要通过`std::ref()`来实现，但是在匿名函数中，按值还是按引用传递则是十分清晰的。
+
+在C++14中，没有理由使用`std::bind`,但是在C++11中下述情形使用`std::bind`是合理的：
+
++ **移动捕获**。C++11的*lambda*不提供移动捕获，但是可以通过结合*lambda*和`std::bind`来模拟
+
++ **多态函数对象**。因为bind对象上的函数调用运算符使用完美转发，所以它可以接受任何类型的实参。当你要绑定带有模板化函数调用运算符的对象时，此功能很有用。 例如这个类：
+
+  ```c++
+  class PolyWidget {
+  public:
+      template<typename T>
+      void operator()(const T& param);
+      …
+  };
+  
+  //使用std::bind绑定一个可调用对象
+  PolyWidget pw;
+  auto boundPW = std::bind(pw, _1);
+  
+  //这样就可以传入任意实参了
+  boundPW(1930);              //传int给PolyWidget::operator()
+  boundPW(nullptr);           //传nullptr给PolyWidget::operator()
+  boundPW("Rosebud"); 		//传字面值给PolyWidget::operator()
+  ```
+
+  这一点无法在C++11中做到，但是C++14(auto 支持返回值和lambda了)则完全可以
+
+  ```c++
+  auto boundPW = [pw](const auto& param)  //C++14 
+                 { pw(param); };
+  ```
+
