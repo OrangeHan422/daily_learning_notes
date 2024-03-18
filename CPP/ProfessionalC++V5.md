@@ -1846,3 +1846,412 @@ void GameBoard<T>::move(size_t xSrc,size_t ySrc,size_t xDest,size_t yDest)
 + 对于概念，就是一个函数对象声明并赋值的形式，但是这个值硬性要求为bool，即=后面的函数（或表达式，或requires）必须返回bool。概念后面可以是各种requires。注意结束需要加分号
 + 对于requires，就是编译检查，但是标准库提供了很多封住好的模板。注意单独使用时，结束不需要加分号。但是嵌套在概念中，需要加分号
 + 最后函数决议，有限选择的是限制最少的（为了方便记忆：模板的出现给你提供了极大的自由，在函数决议的时候，编译器也想要自由，所以有限选择限制少的。所以，all is for freedom!!!）
+
+### ch13 C++I/O揭秘
+
+#### 13.1 使用流
+
+##### 13.1.3 流式输出
+
+1、输出的基本概念
+
+`\n`和`std::endl`的区别是：`\n`仅开始一个新行，而`std::endl`还会刷新缓冲区。所以在使用`std::endl`的时候需要注意性能问题。
+
+3、处理输出错误
+
+当一个流处于正常状态，称这个流是好的（good）。
+
+```c++
+if(cout.good()){
+    cout <<"cout good" <<endl;
+}
+```
+
+如果bad()方法返回true，那么意味着发生了致命错误。但是fail()返回true可能仅仅是失败(例如碰到了eof())，例如可以对流调用flush()后，调用fail()来确定是否刷新成功。
+
+```c++
+cout.flush();
+if(cout.fail()){
+    cout << "Unable to flush" << endl;
+}
+```
+
+流具有转换为bool类型的转换运算符：
+
+```c++
+cout.flush();
+if(cout){
+    cout << "Unable to flush" << endl;
+}
+```
+
+需要注意的是：遇到文件结束标记的时候，good()和fail()都会返回false，即`good()==(!fail() && !eof())`
+
+对流的错误也可以通过异常机制进行处理：
+
+```c++
+cout.exceptions(ios::failbit|ios::badbit|ios::eofbit);//set cout exception
+try{
+    cout << "test" << endl;
+}catch(const ios_base::failure& ex){
+    cerr << "Caught exception:" << ex.what() <<", error code= " << ex.code() <<endl;
+}
+//可以通过clear重置流的错误状态
+cout.clear();
+```
+
+4、输出操作算子
+
+`std::endl`就是一个操作算子，即输出换行符以及刷新缓冲区。其他有用的操作算子大部分定义在`<ios>`和`<iomanip>`标准头文件中：
+
++ boolalpha和noboolalpha：流是否将bool输出为true或者false
++ hex,oct,dec：十六进制。八进制。十进制
++ setprecision:设置输出小数时的小数位数
++ setw:设置输出数值数据的字符宽度
++ setfill:将一个设置为流的新的填充字符
++ showpoint:对于不带小数部分的浮点数，强制流总是显示或不显示小数点
++ put_money:向流写入一个格式化的货币值
++ put_time:向流写入一个格式化的时间值
++ quoted:将给定的字符串封装在引号汇总，并转义嵌入的引号
+
+```c++
+bool myBool{true};
+cout << "This is default: " << myBool << endl;
+cout << "This should be true:" << myBool << endl;
+cout << "This should be 1:" << myBool << endl;
+
+int i{123};
+printf("This should be '   123':%6d\n",i);
+cout << "This should be '   123':" << setw(6) << i << endl;
+
+printf("This should be '000123':%06d\n",i);
+cout << "This should be '000123':" << setfill('0') << setw(6) << i << endl;
+cout << "This should be '***123':" << setfill('*') << setw(6) << i << endl;
+//if used setfill,remember to reset
+cout << setfill(' ');
+
+
+double db1{1.452};
+double dbl2{5};
+cout << "This should be ' 5':" << setw(2) << noshowpoint <<dbl2 << endl;
+cout << "This should be '@@1.452':" << setfill('@') << setw(7) << noshowpoint <<dbl1 << endl;
+//if used setfill,remember to reset
+cout << setfill(' ');
+
+
+//set locale
+cout.imbue(locale{""});
+
+cout << "This is 123456 formatted according to your location:" << 123456 << endl;
+
+cout << "This should be a monetary value of 120000,formatted according to your location:"
+    << put_money("12000") << endl;
+
+time_t t_t{time(nullptr)};
+tm* t{laocaltime(&t_t)};
+cout << "This should be the current date and time,formatted according to your location:"
+    << put_time(t,"%c") << endl;
+
+cout << "This should be:\"Quoted string with \\\"embedded quotes\\\".\":"
+    << quote("Quoted string with \"embedded quotes\".") << endl;
+
+cout << "This should be 1.2346:" << setprecision(5) << 1.23456789 << endl;
+//equal with
+cout.precision(5);
+cout << "This should be 1.2346:" << 1.23456789 << endl;
+```
+
+##### 13.1.4 流式输入
+
+默认情况下，`>>`运算符根据空白字符对输入值进行标志化。即使用空白字符进行分割（注意是空白，包括：` `,`\f`,`\n`,`\r`,`\t`,`\v`）
+
+应该养成读取数据后就检查流状态的习惯：
+
+```c++
+int sum;
+
+while(!cin.bad()){
+    int number;
+    cin >> number;
+    if(cin.good()){
+        sum += number;
+    }else if(cin.eof()){
+        break;
+    }else if(cin.fail()){
+        cin.clear();
+        string badToken;
+        cin >> badToken;//consume the bad input
+        cout << "WARNING:Bad input emcountered: " << badToken << endl;
+    }
+}
+```
+
+`std::getline()`可以指定换行字符，默认是`\n`:
+
+```c++
+getline(cin,myString,'@');
+```
+
+#### 13.2 字符串流
+
+将对象转换为“扁平类型”（如字符串类型）的过程通常称之为编组(marshall)。将对象保存至磁盘或者通过网络发送时，编组操作非常有用。（联想工作中的transrecordset，就可以称之为编组，对序列化和反序列化非常有用。）
+
+#### 13.3 文件流
+
+方法和c打开文件类似，注意打开方式不再是和c一样的使用宏变量：
+
+| 常量             | 说明                                         |
+| ---------------- | -------------------------------------------- |
+| ios_base::app    | 打开文件，在每一次写操作之前，移动到文件末尾 |
+| ios_base::ate    | 打开文件，打开之后立即移动到文件末尾         |
+| ios_base::binary | 以二进制模式执行输入和输出操作               |
+| ios_base::in     | 打开文件，从头开始读取                       |
+| ios_base::out    | 打开文件，从头开始覆盖写入                   |
+| ios_base::trunc  | 打开文件，并删除（截断）任何已有数据         |
+
+##### 13.3.2 通过seek()和tell()在文件中转移
+
+所有的输入流和输出流都有`seekx()`和`tellx()`方法。如seekg()(g 表示get),seekp(p 表示put)。
+
+seekx()有两个版本，一个接收一个实参：绝对位置；另一个接收一个偏移量和位置。位置的类型是`std::streampos`，偏移量的类型为`std::streamoff`
+
+| 位置          | 说明             |
+| ------------- | ---------------- |
+| ios_base::beg | 表示流的开头     |
+| ios_base::end | 表示流的结尾     |
+| ios_base::bur | 表示流的当前位置 |
+
+##### 13.3.3 将流链接在一起
+
+可以通过`tie()`方法完成流的链接。将输出流链接至输入流，对输入流调用`tie()`方法，并传入输出流的地址。要解除链接，需要转入nullptr。这种机制可以用来保持两个相关文件的同步。（链接意味着交替使用的时候会立即刷新缓冲区，参考cout和cin）
+
+#### 13.4 双向I/O
+
+可以同时执行输入输出：bindirectional stream
+
+fstream类提供了双向文件流，stringstream提供了双向访问字符串流。
+
+#### 13.5 文件系统支持库
+
+C++标准库中包含一个文件系统支持库，定义在`<filesystem>`头文件中，并且位于`std::filesystem`名称空间中。它允许编写可移植的代码来处理文件系统。
+
+##### 13.5.1 路径
+
+```c++
+path p1{R"(D:\Foo\Bar)"};//raw string
+path p2{"D:/Foo/Bar"};
+p1.append("Bar");//D:\Foo\Bar\Bar
+p2 /= "Bar";//D:\Foo\Bar\Bar
+
+p1.concat("test");//D:\Foo\Bar\Bartest
+p1 += "test";//D:\Foo\Bar\Bartest
+```
+
+注意:`append()`和`operator/=`都会自动插入一个平台相关的路径分隔符，而`concat()`和`operator+=`不会
+
+path接口支持remove_filename(),replace_filename(),replace_extension(),root_name(),parent_path(),extension(),stem(),filename(),has_extension(),is_absolute(),is_relative()等操作，如：
+
+```c++
+path p{R"(C:\Foo\Bar\file.txt)"};
+cout << p.root_name() << endl;//C:
+cout << p.filename() << endl;//file.txt
+cout << p.stem() << endl;//file
+cout << p.extension() << endl;//.txt
+```
+
+##### 13.5.2 目录条目
+
+如果查询文件系统上的实际目录或文件，需要从路径构造一个`directory_entry`。`directory_entry`接口支持exists(),is_directory(),is_regular_file(),file_size(),last_write_time()等操作，如：
+
+```c++
+path p{"c:/windows/win.ini"};
+directory_entry dirEntry{p};
+if(dirEntry.exists() && dirEntry.is_regular_file()){
+    cout << "File size: " <<dirEntry.file_size() << endl;
+}
+```
+
+### ch14 错误处理
+
+#### 14.1 错误与异常
+
+##### 14.1.2 C++中异常的优点
+
+异常不能被忽略，如果没有捕获异常，程序会终止。
+
+#### 14.2 异常机制
+
+##### 14.2.1 抛出和捕获异常
+
+为了使用异常，要在程序中包括两部分：处理异常的try/catch结构和抛出异常的throw语句。
+
+如果没有抛出异常，那么catch块中的代码不会执行。
+
+如果抛出了异常，throw语句之后或者在抛出异常的函数后的代码不会执行，根据抛出的异常的类型，控制会立刻转移到对应的catch块。
+
+throw是C++中的关键字，是抛出异常的唯一方法。
+
+##### 14.2.2 异常类型
+
+可以抛出任何类型的异常。可以抛出一个`std::exception`类型的对象。但异常未必是对象。也可以抛出一个简单的int值，如：
+
+```c++
+vector<int> funf(string_view filename){
+    ifstream iStream(filename.data());
+    if(iStream.fail()){
+        throw 5;
+    }
+}
+
+
+//对应的try/catch应该如下修改
+try{
+    myInt = func(filename);
+}catch(int e){
+    cerr << format("Unable to open file {} (Error code {})",filename,e);
+    return 1;
+}
+```
+
+尽管可以抛出任意类型，但是通常应该将对象作为异常抛出，原因:
+
++ 对象的类名可传递信息
++ 对象可存储信息，包括描述异常的字符串
+
+##### 14.2.3 按const引用捕获异常对象
+
+建议按照const引用捕获异常，可以避免按值捕获异常时可能出现的对象截断
+
+##### 14.2.4 抛出并捕获多个异常
+
+对于想要捕获的异常类型来说，增加const属性不会影响匹配的目的。
+
+可以使用特定的语法编写与所有异常匹配的catch语句：
+
+```c++
+try{
+    myInt = func(filename);
+}catch(...){//...这里是语法，并非省略号
+    cerr << format("Unable to open file {} (Error code {})",filename,e);
+    return 1;
+}
+```
+
+##### 14.2.5 未捕获的异常
+
+如果存在未捕获到的异常，会调用内建的terminate函数，这个函数调用`<cstdlib>`中的abort()来终止程序。可调用set_terminate()函数设置字节的terminate_handler()，这个函数蔡喁执行回调函数（既没有参数，也没有函数值）的指针作为参数。
+
+```c++
+try{
+    main(argc,argv);
+}catch(...){
+    if(terminate_handler != nullptr){
+        terminate_handler();
+    }else{
+        terminate();
+    }
+}
+
+//设置自己的terminate_handler
+[[noreturn]] void myTer(){
+    cout << "Uncaught exception" << endl;
+    _Exit(1);
+}
+
+int main(){
+    set_terminate(myTer);
+    ...
+}
+```
+
+一般情况下不常用，但是有些时候可以用来创建崩溃转储。
+
+##### 14.2.6 noexcept说明符
+
+如果一个函数带有noexcept标记，但是抛出了异常，C++将调用terminate来终止应用程序。
+
+在派生类重写虚方法时，可将重写的虚方法标记为noexcept（即使基类不是noexcept），但是反过来不可以。
+
+##### 14.2.7 noexcept(expression)说明符
+
+当且仅当给定的表达式返回true时，noexcept生效。
+
+#### 14.3 异常与多态性
+
+##### 14.3.2 在类层次结构中捕获异常
+
+当利用多态性捕获异常时，一定要按引用捕获。如果按照按值捕获，可能发生阶段。
+
+对于catch语句，会按照代码中的顺序进行匹配。一旦匹配，后续的catch将不再执行。
+
+##### 14.3.3 编写自己的异常类
+
+```c++
+class FileError:public exception
+{
+    public:
+    	FileError(string filename):m_filename(move(filename)){}
+    	const char * what() const noexcept override {return m_message.c_str();}
+    	virtual const string& getFilename() const noexcept{return m_filename;}
+    protected:
+    	virtual void setMessage(string message){m_message = message;}
+    private:
+    	string m_filename;
+    	string m_message;
+};
+```
+
+##### 14.3.4 源码位置（C++20）
+
+在C+20之前都是铜鼓`__FILE__`，`__LINE__`这类宏来记录信息。
+
+C++20在`<source_location>`中以类的形式，为这些宏提供了替代品。`source_location`有以下公有方法：
+
+| 访问器          | 描述       |
+| --------------- | ---------- |
+| file_name()     | 源码文件名 |
+| function_name() | 函数名     |
+| line()          | 行数       |
+| column()        | 列数       |
+
+使用current()可以在方法被调用的位置上创建source_location实例。
+
+可以用在日志或者异常中：
+
+```c++
+void logMessage(string_view message,cosnt source_location& location = source_location::current())
+{
+    cout <<format("{}({}):{}:{}",location.filename(),location.line(),location.functionname(),message) << endl;
+}
+```
+
+```c++
+class FileError:public exception
+{
+    public:
+    	FileError(string filename):m_filename(move(filename)){}
+    	const char * what() const noexcept override {return m_message.c_str();}
+    	virtual const string& getFilename() const noexcept{return m_filename;}
+    	//
+    	virtual const source_location& where() const noexcept{returm m_location;}
+    protected:
+    	virtual void setMessage(string message){m_message = message;}
+    private:
+    	string m_filename;
+    	string m_message;
+    	//	
+    	source_location m_location;
+};
+```
+
+#### 14.5 栈的释放与清理
+
+当代码抛出一个异常，会在栈中寻找catch处理程序。当发现一个catch处理程序时，栈会释放中间所有的栈，直接跳到定义catch处理程序的站层。但是，当释放栈的时候，并不释放指针变量，也不会执行其他清理工作。
+
+所以，在自己编写代码的时候，应该尽量的使用现代C++
+
+#### 14.6 常见的错误处理问题
+
+##### 14.6.1 内存分配错误
+
+在64位系统上new几乎不会抛出异常，但是在特殊系统中，可能因为内存不足抛出bad_alloc异常。C++允许指定new_handler回调函数，如果存在new_handler函数，当内存分配失败时，内存分配例程会调用new_handler而不是抛出异常。new_handler不能有参数，也不能有返回值。如果new_handler抛出异常，那么必须是bad_alloc异常或者派生与bad_alloc的异常。
