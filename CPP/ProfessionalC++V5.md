@@ -2255,3 +2255,166 @@ class FileError:public exception
 ##### 14.6.1 内存分配错误
 
 在64位系统上new几乎不会抛出异常，但是在特殊系统中，可能因为内存不足抛出bad_alloc异常。C++允许指定new_handler回调函数，如果存在new_handler函数，当内存分配失败时，内存分配例程会调用new_handler而不是抛出异常。new_handler不能有参数，也不能有返回值。如果new_handler抛出异常，那么必须是bad_alloc异常或者派生与bad_alloc的异常。
+
+### ch15 C++运算符重载
+
+#### 15.1 运算符重载概述
+
+##### 15.1.2 运算符重载的限制
+
+运算符重载时，运算符必须是类中的一个方法，或者全局重载运算符函数至少有一个参数必须是一种用户定义的类型
+
+##### 15.1.3 运算符重载的选择
+
+有三种不同类型的运算符：
+
++ 必须为方法的运算符。比如`operator=`和类绑定非常紧密，不能出现在其他地方。
++ 必须为全局函数的运算符。比如，`operator<<`和`operator>>`，这两个运算符的左侧是iostream对象
++ 既可以为方法又可以为全局函数的运算符
+
+good habbit:重载运算符是，如果这个运算符不修改对象，应将整个方法标记为const
+
+##### 15.1.4 不应重载的运算符
+
+取地址(operator&)重载一般没特别的用途，如果重载会导致混乱。另外二元布尔运算符如`operator&&`和`operator||`也不应该重载，因为这样会使C++的短路求值规则失效。
+
+#### 15.2 重载算数运算符
+
+##### 15.2.1 重载一元负号和一元正好运算符
+
+```c++
+Myclass Myclass::operator-() const
+{
+    return Myclasss{-getValue()};
+}
+```
+
+#### 15.7 重载解除引用运算符
+
+##### 15.7.2 实现operator->
+
+`operator->`实际上是`operator*`和`operator.`的结合，但是`.`运算符是不可以重载的。所以`operator->`的重载是一个特例：
+
+```c++
+Myclass->set(5);
+//会被解释为：
+(Myclass.operator->())->set(5);
+```
+
+即，重载的`operator->`会将结果返回给另一个`operator->`.因此，应该返回一个指向对象的指针。如：
+
+```c++
+template <typename T> class Pointer
+{
+  public:
+    T* operator->(){return m_ptr;}
+    const T* operator() const{return m_ptr;}
+};
+```
+
+注意，`operaotr*`和`operator->`是不对称的。
+
+#### 15.8 编写转换运算符
+
+强制转换运算符可以如此重载：
+
+```c++
+operator double() const;
+
+//实现
+MyClass::operator double() const
+{
+    return getVal();
+}
+//使用
+MyClass mCls{1.23};
+double d1{mcls};//OK
+```
+
+##### 15.8.1 auto运算符
+
+也可以根据函数返回值重载auto
+
+但是应该注意类型推导的原则，CV限定和引用都会被去除
+
+```c++
+operator auto() const{return getVal();}
+operator const auto&() const {...}
+```
+
+#### 15.9 重载内存分配和内存释放运算符
+
+##### 15.9.1 new和delete的工作原理
+
+new表达式有4种常规表达式和两种plecement new表达式，均可以重载
+
+```c++
+void* operator new(size_t size);
+void* operator new[](size_t size);
+// new(nothrow) MyClass()	new(nothrow) MyClass[]()
+void* operator new(size_t size,const std::nothrow_t&) noexcept;
+void* operator new[](size_t size,const std::nothrow_t&) noexcept;
+
+//placement new不分配内存，而是在已有内存上重新构造.new(ptr) MyClass();
+void* operator new(size_t size,void* p) noexcept;
+void* operator new(size_t size,void* p) noexcept;
+```
+
+对应的delete表达式，只可以调用两种不同形式：delete和delete[]，没有nothrow和placement形式。但是operator delete的重载依旧有6种。但是C++标准指出，从delete抛出异常行为是未定义的。所以delete永远都不应该抛出异常。因此nothrow版本的operator delete是多余的；而placement版本的delete应该是一个空操作，以你为在placement new中并没有分配新的内存，因此也不需要释放新内存
+
+```c++
+void* operator delete(void* ptr) noexcept;
+void* operator delete[](void* ptr) noexcept;
+
+void* operator delete(void* ptr,const std::nothrow_t&) noexcept;
+void* operator delete[](void* ptr,const std::nothrow_t&) noexcept;
+
+//placement new不分配内存，而是在已有内存上重新构造.new(ptr) MyClass();
+void* operator delete(void* ptr,void*) noexcept;
+void* operator delete(void* ptr,void*) noexcept;
+```
+
+##### 15.9.2 重载operator new和operator delete
+
+Bjarne Stroustrup：“全局替换operator new 和operator delete是需要胆量的。”
+
+当重载operator new时，要重载对应形式的operator delete。否则内存会按照指定的方式分配，但是根据内建的方式释放，这两者不一定兼容。
+
+建议重载所有形式的operator new，避免内存分配的不一致。如果不想提供任何实现，可以使用=delete显式伤处函数，避免别人使用。
+
+##### 15.9.4 重载带有额外参数的operator new和operator delete
+
+new的额外参数以函数调用的语法传递（和nothrow new一样）。如：
+
+```c++
+void* MyClass::operator new(size_t size,int extra);
+
+MyClass* cls{new(5) MyClass()};
+```
+
+##### 15.9.6 重载用户定义的字面量运算符
+
+用户定义的字面量应该以下划线开头，下划线后的第一个字符必须是小写字母，例如`_i`,`_s`等
+
+字面量运算符可以raw模式和cooked模式工作。
+
+在raw模式下，字面量运算符接收字符序列；在cooked模式下，字面量运算符接收特定的解释类型。
+
+以C++字面量123为例，raw字面量运算符当做`1`、`2`、`3`的字符序列来接收，cooked模式字面量运算符当做整数123来接收。
+
+##### 15.9.7 cooked模式字面量运算符
+
+```c++
+std::string operator"" _s(const char* str,size_t len)
+{
+    return std::string(str,len);
+}
+
+//使用
+std::string str1{"Hello"_s};
+auto str2{"Hello"_s};//str2 has as type std::string
+```
+
+##### 15.9.8 raw模式字面量运算符
+
+raw模式仅接受字符序列，不方便不推荐。
