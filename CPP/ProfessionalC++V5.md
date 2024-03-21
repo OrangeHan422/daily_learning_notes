@@ -2863,3 +2863,246 @@ printRange("反转序列：",values);
 | basic_istream_view<br />istream_view | 创建一个视图，其中包含通过调用底层输入流上的调用提取运算符(>>)检索到的元素 |
 
 总结：范围库通过指定想要完成什么，而不是如何完成，它允许编写更多的函数式代码
+
+### ch18 标准库容器
+
+#### 18.1 容器概述
+
+标准库提供了16个容器，分为四大类：
+
++ 顺序容器
+
+  - vector
+  - deque
+  - list
+  - forward_list
+  - array
+
++ 关联容器
+
+  - map/multimap
+  - set/multiset
+
++ 无序关联容器（哈希表）
+
+  - unordered_map/unordered_multimap
+  - unordered_set/unordered_multiset
+
++ 容器适配器
+
+  - queue
+  - priority_queue
+  - stack
+
+  ##### 18.1.1 对元素的要求
+
+  标准库容器对元素使用值语义，也就是在输入元素时保存元素的副本。请求元素元素时，会返回所存副本的引用。
+
+  如果喜欢引用语义，可以存储元素的指针。另一种方式是在容器中存储`std::reference_wrapper`,可以使用`std::ref`和`std::cref()`创建`std::reference_wrapper`。
+
+  需要注意的是，在容器汇总存储指针，应该使用`std::unique_ptr`或者`std::shared_ptr`
+
+#### 18.2 顺序容器
+
+  ##### 18.2.1 vector
+
+  从C++20开始，`std::vector`是`constexpr`，和`std::string`一样。这意味着两者可以用于`constexpr`函数和类的实现。目前仅这两种容器是`constexpr`
+
+  vector需要注意的是和统一初始化的混合使用：
+
+  ```c++
+  vector<int> intVec{10,100};//vector with 2 elements:10,100
+  vector<int> intVec(10,100);//vector with 10 elements,all of them are 100
+  ```
+
+  vector提供了assign方法，删除所有现有的元素，并添加任意数目的元素
+
+  ```c++
+  vector<int> intVec(10);//10 elements with the value of 0
+  intVec.assign(5,10);//now intVec has 5 elements with value of 10
+  ```
+
+  vector提供的swap方法可以在**常量**时间下交换两个vector的内容
+
+  **迭代器和索引**
+
+  迭代器的安全性和指针接近，都不安全。使用迭代器主要原因：
+
+  + 使用迭代器可在容器的任意位置插入
+  + 可以使用标准模板库算法
+  + 效率更高，虽然不使用vector，但是对于list、map以及set适用
+
+  在vector存储引用：
+
+  ```c++
+  //该实例中对元素更改就是对原始数据的更改
+  string str1{"Hello"};
+  string str2{"World"};
+  
+  vector<reference_wrapper<string>> vec{ref(str1)};
+  vec.push_back(ref(str2));
+  ```
+
+  在C++20之前，删除vector中满足条件的元素，一般是通过遍历
+
+  但是C++20开始，提供了`std::erase()` 和`std::erase_if()`可以删除指定元素。其中`std::erase`可接收需要操作的容器，以及需要删除的操作。`std::erase_if`则是接收需要操作的容易，以及谓词（是一个广义函数）。**这也是C++20最重要的特性，增加了大量函数式编程手段。**
+
+  从C++17开始`emplace_back()`方法返回已插入元素的引用。
+
+  `std::size()`和`std::empty()`可适用于所有容器。C++20引用了`std::ssize()`，返回的是有符号的整型：
+
+  ```c++
+  auto s1{std::size(vec)};//size_t(unsigned)
+  auto s2{std::ssize(vec)};//long long(signed)
+  ```
+
+  **内存回收**
+
+  可以使用swap方法，将内存置换到一个临时对象中
+
+  ```c++
+  vector<int> values;
+  vector<int>().swap(values);
+  ```
+
+  再次提醒，当访问基于一个或怼个模板参数的类型的时候，必须显示地指定typename:
+
+  ```c++
+  //假设m_iter是模板类的成员
+  typename std::vector<T>::iterator m_iter;
+  ```
+
+  ##### 18.2.2 `vector<bool>`特化
+
+  底层实际上是位图，对元素的访问实际上是一个reference类，即底层bool的代理类。不推荐使用，如果需要，应该首先考虑使用`std::bitset`。除非需要动态的扩展数组长度，否则应该避免使用（设计上的缺陷，为了省内存使用位图，然后为了统一行为又使用了代理类，得不偿失。）
+
+  ##### 18.2.4 list
+
+  从C++20开始，remove(),remove_if(),unique()都会返回删除的元素数量(size_t)
+
+  ##### 18.2.6 array
+
+  如果创建`std::array`时未初始化，则其中的元素是垃圾值。对于其他容器，总是默认使用零初始化的。本质还是因为`std::array`和C风格的数组统一。
+
+  C++20引入了一个新的分成员函数`std::to_array()`：
+
+  ```c++
+  auto arr1{to_array({11,22,33})};//array<int,3>
+  double carray[] {2,3,4};
+  auto arr2{to_array(carray)};//array<double,3>
+  ```
+
+  ##### 18.2.7 span(C++20)
+
+span实际上也是一个视图，仅存储头指针和长度。复制成本很低，因为span永远不会复制数据。
+
+可以使用`subspan()`从现有的span创建子视图。参数分别是偏移量和数量。还有first和last方法，分别返回span的前或者后n个元素的span的子视图。
+
+和string_view只提供只读视图不同，span可以对底层元素进行读写访问。
+
+在编写以`const vector<T>&`为参数的函数时，可以使用`span<const T>`进行替换。
+
+```c++  
+//未引入span前，C++20前
+void print(const vector<int>& value);
+//如果打印c风格数组，需要重载
+void print(const int value[],size_t count);
+//如果打印std::array,仍需要重载
+void pritn(const array& array);
+
+
+//但是span可以统一这些：
+void print(span<const int> values);
+```
+
+#### 18.3 容器适配器
+
+queue,priority_queue以及stack都是对顺序容器的包装，提供了对应数据结构的操作。
+
+##### 18.3.1 queue
+
+pop()不会弹出元素。如果需要元素副本，需要先使用front()获得这个元素（stack同理）
+
+#### 18.4 有序关联容器
+
+##### 18.4.2 map
+
+可以使用insert()方法向map添加元素。如果指定的键已经存在，那么insert()不会改写元素，如果希望更新元素，应该使用insert_or_assign()方法。
+
+insert()返回的是`pair<iter,bool>`的形式，bool来判断是否插入成功。在C++17提供了if语句的初始化器之后，插入和判断变的很简洁：
+
+```c++
+//C++11
+map<int,Data> dataMap;
+auto ret{dataMap.insert({1,Data{4}})};
+if(ret.second){
+    cout << "insert succeeded" << endl;
+}else{
+    cout << "insert failed" << endl;
+}
+
+//C++17
+if(auto ret{dataMap.insert({1,Data{4}})};result.second){
+    ...
+}
+//使用结构化绑定一样适用
+if(auto [iter,success]{dataMap.insert({1,Data{4}})};success){
+    ...
+}
+```
+
+对于emplace，有一个try_emplace()的方法，如果给定的键不存在则插入；否则什么也不做。
+
+如果想要直到map中是狗有某个键元素，可以使用count成员函数。C++20对所有关联容器提供了contains()的方法来判断给定键是否存在。
+
+**结点(C++17)**
+
+所有有序和无序的关联容器都被称为基于结点的数据结构。标准库以结点句柄(node handle)的形式提供对结点的直接访问。确切类型并未指定，但是每个容器都有一个node_type的类型别，指定容器结点句柄的类型（typename）。结点句柄**只能移动**，是节点中存储的元素的所有者，它提供对键和值的读写访问。
+
+可以基于给定的迭代器位置或键，从关联容器中使用extract()方法提取结点。从容器中提取结点的时候，会将元素从容器中删除，因为返回的结点句柄时元素的唯一拥有者。
+
+```c++
+map<int,Data> dataMap2;
+auto extractedNode{dataMap.extract(1)};
+dataMap2.insert(std::move(extractedNode));//注意结点句柄只能移动，因为结点句柄时元素的“唯一”拥有者
+//后两行可以合并为
+extractedNode(dataMap.extract(1));
+```
+
+##### 18.4.3 multimap
+
+因为键值可以重复。想要查询元素可以使用lower_bound()和upper_bound()方法。equal_range则是更为高效。
+
+#### 18.5 无序关联容器/哈希表
+
+##### 18.5.1 哈希函数
+
+C++标准为指针和所有基本数据类型都提供了哈希函数，对于自定义类则没有，如果需要，建议存储指针（自己设计完美哈希是一件十分困难的事情）。
+
+#### 18.6 其他容器
+
+##### 18.6.4 bitset
+
+bitset并不是一个标准的容器:bitset大小固定，没有对元素类型模板化，也不支持迭代。但是是一个有用的工具。
+
+```c++
+bitset<10> myBs;
+myBS.set(3);//set pos 3 to 1
+myBS.set(6);
+myBS[8] = true;
+myBS[9] = myBS[3];
+if(myBS.test(3)){
+    cout <<"bit 3 is set" << endl;
+}
+cout << myBS << endl;//1 101 001 000
+
+auto str1{"0011001100"};
+auto str2{"0000111100"};
+bitset<10> bitsOne{str1};
+bitset<10> bitsTwo{str2};
+auto bitsThree{bitsOne & bitsTwo};
+cout << bitsThree << endl;//0 000 001 100
+bitsThree <= 4;
+cout << bitsThree << endl;//0 011 000 000
+```
+
