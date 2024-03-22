@@ -3106,3 +3106,293 @@ bitsThree <= 4;
 cout << bitsThree << endl;//0 011 000 000
 ```
 
+### ch19 函数指针，函数对象，lambda对象
+
+#### 19.2 指向方法（和数据成员）的指针
+
+在C++中，拿到类数据成员和方法的地址来获得指向它们的指针是完全合法的，但是，没有对象就不能访问非静态数据成员或者调用非静态方法。类数据成员和方法的全部意义在于它们以每个对象为基础存在，因此，当想要通过指针调用方法或者访问数据成员时，**必须**在对象的上下文中解引用该指针。（这个需要用户自己注意，实际上，即使空指针也可访问类内非静态的成员函数）
+
+```c++
+int (Employee::*methodPtr) () const { &Employee::getSalary };
+Employee employee{"John" , "Doe"};
+cout << (employee.*methodPtr)() << endl;//需要注意括号的使用
+//指针形式调用
+Employee* employee{"John" , "Doe"};
+cout << (employee->*methodPtr)() << endl;
+//使用了类型别名可以让methodPtr更易读
+using PtrToGet  = int (Employee::*) () const;
+PtrToGet methodPtr{&Employee::getSalary};
+Employee employee{"John" , "Doe"};
+cout << (employee.*methodPtr)() << endl;
+//可以使用auto进一步简化
+auto methodPtr{&Employee::getSalary};
+Employee employee{"John" , "Doe"};
+cout << (employee.*methodPtr)() << endl;
+```
+
+> 可以使用`std::mem_fn()`避免`.*`和`->*`这样的语法。
+
+std::function
+
+在`<functional>`中定义的`std::function`函数模板是一个多态函数包装器，可以用来创建任何可调用对象的类型，如函数、函数对象或者lambda表达式。语法如下：
+
+```c++
+std::function<R(ArgsType...)>;
+// R是返回类型，ArgsType是函数参数类型的逗号分割列表
+void func(int num,string_view str)
+{
+    cout <<format("func({},{})",num,str) << endl;
+}
+//声明和调用
+function<void(int,string_view)> f1{func};
+f1();
+//通过CTAD可以简化
+function f1{func};
+//注意，通过auto推导出来的是函数指针，而非function对象
+auto f1{func};
+//如果有函数的形参为函数，推荐做法是使用模板类型，这样可以传入function也可以传入函数指针，避免不必要的性能开销
+template<typename FuncType1,typename FuncType2>
+void func(FuncType1 func1,FuncType2 func2);
+//或者使用语法糖auto
+void func(auto func1,auto func2);
+```
+
+> 注意，在类的数据成员需要函数时，`std::function`非常有用。联想工作中的第一版线程池的任务。
+
+#### 19.3 函数对象
+
+##### 19.3.2 标准库中的函数对象
+
+###### 1、算数函数对象
+
+C++为5中二元运算符提供了**仿函数**类模板：plus、minus、multiplies、divides、modulus
+
+```c++
+plus<int> Plus;
+int res{Plus(4,5)};
+cout << res << endl;
+```
+
+这样使用看起来很蠢，因为算数对象的好处并不在此，而是可以将它们直接作为回调传递给其他函数。
+
+```c++
+template <typename Iter,typename StartValue,typename Operation>
+auto accumulateData(Iter begin,Iter end,StartValue startValue,Operation op)
+{
+    auto accumulated{startValue};
+    for(Iter iter{begin};iter != end; ++iter){
+        accumulated = op(accumulated,*iter);//这样就比写switch高级多了
+    }
+    return accumulated;
+}
+//使用
+double func(span<const int> values)
+{
+    auto res{accumulateData(cbegin(values),cend(values),1,muliplies<int>{})};//注意muliplies<int>{}
+    return pow(res,1.0/values.size());
+}
+```
+
+###### 2、透明运算符仿函数
+
+其实就是CTAD，非要搞新词汇装13。好处是泛化能力更强，并且性能更好，推荐使用
+
+```c++
+double func(span<const int> values)
+{
+    auto res{accumulateData(cbegin(values),cend(values),1,muliplies<>{})};//注意muliplies<>{}
+    return pow(res,1.0/values.size());
+}
+//结果为6.1
+vector<int> values{1,2,3};
+auto res{accumulateData(cbegin(values),cend(values),1.1,muliplies<>{})};//注意muliplies<>{}
+//结果为6
+vector<int> values{1,2,3};
+auto res{accumulateData(cbegin(values),cend(values),1.1,muliplies<int>{})};//注意muliplies<int>{}
+```
+
+###### 3、比较函数对象
+
+equal_to,not_equal_to,less,greater,less_euqal,greater_equeal
+
+C++20增加了对无序关联容器的透明运算符的支持。
+
+###### 4、逻辑函数对象
+
+logical_not,logical_and,logical_or
+
+###### 5、位函数对象
+
+bit_and,bit_or,bit_xor,bit_not
+
+###### 6、适配器函数对象
+
+复杂且晦涩，易读性差。适配器函数可以做的lambda都可以做，工作中使用C++11开发同样的功能的时间，不如升级编译器。带来的性能提升和代码可维护性都是值得的。
+
+唯一需要注意的是`std::bind`在绑定的时候是值传递，如果想要引用传递需要使用`std::ref`和`std::cref`。
+
+另外，注意`std::bind`绑定函数时，形参和实参绑定的时机是在`std::bind`的声明处。而lambda则是在函数真正调用的时候。具体示例：《Effective Mordern C++》
+
+#### 19.4 lambda表达式
+
+##### 19.4.1 语法
+
+编译器会将任何lambda表达式转换为**函数对象**，也称为**lambda闭包**：
+
+```c++
+auto basicLasmbda{[](){cout << "Hello Lambda" << endl;}};
+basicLasmbda();//输出Hello Lambda
+
+//lambda函数实际上会别转换为函数对象
+class CompilerGenerated
+{
+    public:
+    	//注意auto推导会去除CV，以及注意默认是const函数
+    	auto operator()() const { cout << "Hello Lambda" << endl;}
+};
+```
+
+注意，lambda返回默认是值传递，并且去除CV限定和引用，如果想要保持，可以使用C++14的技术：
+
+```c++
+[](const Person& person) -> decltype(auto)//保证了getName返回的类型和lambda返回类型一致，包括CV限定和引用
+{
+    return person.getName();
+}
+```
+
+lambda闭包重载函数调用运算符，会默认标记为const。这也为这，即使捕获列表捕获的非const变量，lambda函数体内也不能改变该值。如果想要该表，需要使用`mutable`
+
+```c++
+double data{1.23};
+auto lamFunc{
+    [data]() mutable {data *= 2;cout << data << endl;}
+};
+```
+
+捕获列表的默认捕获（不推荐，《Effective Mordern C++》）：
+
++ `[=]`:值捕获所有用到的变量
++ `[&]`:引用捕获所有用到的变量
+
+捕获块的注意事项：
+
++ 对象的数据成员不能被捕获
++ 当通过拷贝this指针`[this]`,或拷贝当前对象`[*this]`来捕获this时，lambda可以访问被捕获对象的所有方法和成员，和友元一样。
++ 全局变量总是通过引用捕获，即使你声明了`[=]`,在函数体内依旧可以改变全局变量（全局变量本来就不推荐使用）
+
+lambda完整表达式（C++20后完全可以当做一个函数来看）：
+
+```c++
+[capture_block]<template_params> (parameters) mutable constexpr noexcept_specifier attributes
+    -> return_type
+    requires
+{body}
+```
+
+注意，模板以及约束都是C++20才支持的。
+
+##### 19.4.3 泛型lambda表达式
+
+注意是C++14才支持在lambda中使用auto
+
+```c++
+auto areEqual { [](const auto& val1,const auto& val2){
+    return val1 == val2;
+}};
+```
+
+##### 19.4.4 lambda捕获表达式
+
+lambda捕获表达式允许使用任何类型的表达式初始化捕获变量，它可用于在lambda表达式中引入未从闭包作用域捕获的变量。注意使用捕获初始化的非引用捕获变量时拷贝构造的，这意味着会移除cosnt限定符。
+
+```c++
+double pi{3.1415};
+auto myLambda { [myCap = "Pi:",pi] { cout << myCap << pi;}};
+myLambda();//Pi:3.1415
+```
+
+##### 19.4.5 模板化lambda表达式（C++20）
+
+在C++20之前（C++14之后），如果想要直到参数容器中的元素类型，需要使用`decltype()`和`std::decay_t`这种类型萃取来实现。`std::decay_t`移除了CV和引用限定
+
+```c++
+//假设参数是vector<myClass>
+auto myLambda { [](const auto& values){
+    using V = decay_t<decltype(values)>;//V = vector
+    using T = typename V::value_type;// T = myClass
+    T someValue{};
+    T::func();
+}};
+```
+
+这样子非常复杂，但是在C++20引入模板lambda表达式就简单了许多
+
+```c++
+[] <typename T> (const vector<T>& values){
+    T someValue{};
+    T::func();
+}
+```
+
+##### 19.4.6 lambda表达式作为返回类型
+
+可以使用前面的`std::function`接收返回
+
+```c++
+function<int(void)> func(int x)
+{
+    return [x](){ return 2*x; };
+}
+
+//使用
+function<int(void)> dood{func(5)};
+cout << dood() << endl;//10
+
+//C++14 后可以更简洁
+auto func(int x)
+{
+    return [x](){ return 2*x; };
+}
+
+//使用
+auto dood{func(5)};
+cout << dood() << endl;//10
+```
+
+##### 19.4.7 未计算上下文中的lambda表达式（C++20）
+
+C++20允许在未计算上下文中使用lambda表达式。
+
+```c++
+using LambdaType = decltype([](int a,int b) {return a+b;});
+```
+
+##### 19.4.8 默认构造、拷贝和赋值（C++20）
+
+C++20可以默认构造、拷贝和无状态的lambda表达式：
+
+```c++
+auto lambda { [](int a,int b) {return a+ b;}};
+decltype(lambda) lambda2;		//默认构造
+auto copy{lambda};			    //拷贝构造
+copy = lambda2;					//拷贝赋值
+```
+
+#### 19.5 调用
+
+`<functional>`中定义了`std::invoke()`，可以用于调用任意带有一组参数的可调用对象。
+
+```c++
+void print(string_view msg){ cout << msg << endl; }
+
+int main()
+{
+    invoke(print,"Hello invoke");
+    invoke([](const auto& msg) { cout << msg << endl; },"Hello invoke");
+    string msg {"hello invoke"};
+    cout << invoke(&string::size,msg) << endl;
+}
+```
+
+看起来很基类，但在编写需要调用任意可调用对象的泛型模板代码时，十分有用。
