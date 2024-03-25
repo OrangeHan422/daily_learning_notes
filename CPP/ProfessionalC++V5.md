@@ -3395,4 +3395,202 @@ int main()
 }
 ```
 
-看起来很基类，但在编写需要调用任意可调用对象的泛型模板代码时，十分有用。
+看起来很鸡肋，但在编写需要调用任意可调用对象的泛型模板代码时，十分有用。
+
+### ch20 掌握标准库算法
+
+> 无注意事项，实际使用参考文档，不做笔记，仅简要总结
+
+#### 20.1 算法概述
+
+##### 20.1.1 find()和find_if()算法
+
+注意调用find时，指定的范围不要求是容器中元素的完整范围，还可以是元素的子集。因此也要注意，如果查找失败返回的是函数调用中指定的尾迭代器，而非底层容器的尾迭代器。
+
+如果容器提供了和泛型算法同样的功能，那么应该使用容器的方法，那样速度更快。
+
+find_if算法对范围内每个元素调用谓词(即一个函数)。
+
+```c++
+find(cbegin(myVec),cend(myVec),val);//查找val
+find_if(cbegin(myVec),cend(myVec),[](auto val){return val % 2 == 0; });//查找偶数
+```
+
+##### 20.1.2 accumulate()算法
+
+```c++
+accumulate(cbegin(myVec),cend(myVec),0.0);
+```
+
+accumulate()的第二种重载允许调用者指定要执行的操作，而不是默认的加法
+
+```c++
+accumulate(cbegin(myVec),cend(myVec),1,product);//计算乘积
+```
+
+##### 20.1.3 在算法中使用移动语义
+
+和标准容器一样，标准库算法也做了优化，以便在核实的时候使用移动语义。
+
+##### 20.1.4 算法回调
+
+回调可以有多个拷贝，这一实事对此类回调的副作用有很强的限制。基本上回调必须是无状态的，对于仿函数，意味着函数调用符必须是const，因此不能编写依赖于对象任何内部状态的仿函数。类似于lambda表达式不能标记为mutable
+
+为了避免回调算法被回调，可以使用`std::ref()`辅助函数向算法传递回调引用。
+
+```c++
+auto func {[tally = 0] (int i) mutable {
+    cout << ++tally << endl;return i>=100;
+}};
+auto endIt { cend(myVec)};
+auto it { find_if(cbegin(myVec),cend(myVec),func)};
+for(it!= endIt){cout << *it << endl;}
+func(1);
+//if vec{0,0,0}
+//output:1,2,3,1 最后一次单独调用和前面find_if中调用的行为不统一
+//如果要保证行为统一
+auto it { find_if(cbegin(myVec),cend(myVec),std::ref(func)};
+```
+
+#### 20.2 算法详解
+
+##### 20.2.1 非修改序列算法
+
+###### 搜索算法
+
++ find_if_not:找到第一个不符合谓词的元素
++ adjacent_find:找到第一个连续相等的数字对
++ find_first_of:找到指定元素集合中任意元素第一次出现的位置
++ search:搜索子序列
++ find_end:寻找最后符合条件的子序列
++ find_n(b,e,2,8):找到第一次出现连续两个8的位置
+
+###### 专用的搜索算法
+
+从C++17开始，search算法的第一个可选参数允许指定要使用的搜索算法。
+
+###### 比较算法
+
++ equal()：元素是否都相等
++ mismatch()：返回多个迭代器，每个范围对应一个迭代器，表示范围内不匹配的对应元素
++ lexicographical_conpare()：在两个提供的范围内对具有相同位置的元素相互比较
++ lexicographical_conpare_three_way()：执行C++20的三路比较
+
+###### 计数算法
+
++ all_of()：是否所有元素都满足谓词
++ any_of()：是否存在元素满足谓词
++ none_of()：是否所有元素都不满足谓词
++ count()：对指定值计算
++ count_if()：对满足条件的元素进行统计
+
+##### 20.2.2 修改序列算法
+
+###### 生成
+
+generate()需要一个迭代器范围，将该范围内的值替换为从函数返回的值。
+
+###### 转换
+
+transform()对范围内的每个元素应用回调，期望回调生成一个新元素，并保存在指定的目标范围中。
+
+###### 拷贝
+
+copy()和copy_backward()以及copy_n(),注意copy_n()不做边界检查。
+
+###### 移动
+
+move()和move_backward()。再次注意，移动后的源对象处于有效但是不确定的状态！
+
+###### 替换
+
+replace()和replace_if()
+
+###### 擦除(C++20)
+
+C++20对几乎所有容器都支持erase()和erase_if()。注意参数是容器的引用，而不是迭代器范围
+
+erase()算法不使用于关联容器，因为这些容器有erase(key)方法，该方法的性能更好。erase_if()适用所有容器。
+
+###### 删除
+
+如果不支持C++20，可以使用删除-擦除法，即使用remove_if将不需要的元素移动到容器末尾，再调用容器自己的erase方法。
+
+###### 唯一化
+
+unique()，unique_copy()
+
+###### 乱序
+
+shuffle()以随机顺序重新安排某个范围的元素，复杂度为线性时间。
+
+###### 抽样
+
+sample()从给定源范围返回n个随机选择的元素，并存储在目标范围中。
+
+###### 反转
+
+reverse反转某个范围内元素的顺序。
+
+###### 移动元素(C++20)
+
+shift_left(),shift_right()，行为类似MFC中CString的TrimLeft，TrimRight
+
+##### 20.2.3 操作算法
+
+for_each()主要是为了防止遇到旧代码，实际开发中可以使用范围for循环替换。for_each_n()可以指定范围大小。
+
+##### 20.2.4 分区算法
+
+partition_copy()将来自某个来源的元素复制到两个不同的目标。为每个元素选择目标的依据是谓词的true或false。
+
+partition()则是按照谓词true或false将元素放在前面和后面。
+
+##### 20.2.5 排序算法
+
+通常用于vector,deque,array和C风格数组。
+
+sort(),stable_sort(),is_sorted()
+
+##### 20.2.6 二分查找算法
+
+binary_search(),lower_bound(),upper_bound(),equal_range()
+
+##### 20.2.7 集合算法
+
+set_union(),set_intersection(),set_difference(),set_symmetric_difference()分别是交集，并集，差集，对称差集（异或）
+
+merge()合并算法
+
+##### 20.2.8 最小/最大算法
+
+min(),max(),minmax(),min_element(),max_element(),minmax_element()
+
+需要注意的是防止和编译器定义的非标准宏冲突，尤其是Windows宏定义名称也是min和max，可以使用`#define NOMINMAX`禁用。
+
+`std::clamp()`是一个小型辅助函数，类似三目运算符，如果小于下边界，返回下边界的引用；如果大于上边界，输出上边界的引用，否则返回自身。
+
+##### 20.2.9 并行算法
+
+C++可以指定并行策略来提高算法的性能。执行策略作为第一个参数。执行策略允许算法以并行或矢量的方式运行。所谓的矢量方式就是使用一条硬件指令对多个数据执行操作，即SIMD单指令多数据（考完试后第一次见到实际应用）
+
+| 执行策略类型                | 全局实例  | 描述                               |
+| --------------------------- | --------- | ---------------------------------- |
+| sequenced_policy            | seq       | 不允许并行                         |
+| parallel_policy             | par       | 并行                               |
+| parallel_unsequenced_policy | par_unseq | 并行非矢量，允许在线程之间迁移执行 |
+| unsequened_policy           | unseq     | 矢量，但是不允许并行               |
+
+需要注意，并行的版本是非constexpr的
+
+##### 20.2.10 约束算法(C++20)
+
+C++20对算法新增了约束和概念，都在范围库中。使用更方便，编译报错更清晰。
+
+##### 20.2.11 数值处理算法
+
+iota()生成指定范围内的序列值，从给定值开始，应用operator++生成每个后续值。
+
+accumulate()算法不支持并行，但是reduce支持，accumulate使用的是operator+，reduce使用的是std::plus
+
+inner_product()计算两个序列的内积。也不支持并行，如果需要并行，请使用transform_reduce()。区别还是一个使用的二元运算符，一个使用了std::plus和std::multiplies
