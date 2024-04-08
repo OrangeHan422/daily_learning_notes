@@ -176,7 +176,7 @@ docker kill id		# 强制停止当前的容器
 #### 进入后台运行的容器
 
 ```shell
-# 方式一：docker exec -it id bashShell
+# 方式一：docker -it id bashShell
 
 [root@test /]#docker exec -it id /bin/bash    进入容器后开启一个/bin/bash的终端，可以在bash中操作（常用）
 

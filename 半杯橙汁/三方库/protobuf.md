@@ -37,6 +37,8 @@ sudo ldconfig
 + 使用protoc编译器生成c++文件
 
   ```bash
+  # 使用gRPC生成服务器和客户端文件
+  protoc -I ../../protos --grpc_out=. --plugin=protoc-gen-grpc=`which grpc_cpp_plugin` ../../protos/route_guide.proto
   # protoc --proto_path(proto文件地址) --cpp_out(输出为cpp文件的地址) test.proto(源proto文件名)
   protoc --proto_path=. --cpp_out=. test.proto 
   ```
@@ -81,4 +83,8 @@ sudo ldconfig
   bool SerializeToOstream(ostream* output) const; //将消息写入到给定的C++ ostream中。
   
   bool ParseFromIstream(istream* input); //从给定的C++ istream解析消息。
+  
+  //带有repeated字段的消息，通过add_依次赋值。
+  //使用mutable_，赋值时候，可以使用局部变量，因为在调用的时，内部做了new操作。
+  //参考：https://blog.csdn.net/weixin_43795921/article/details/115474254
   ```

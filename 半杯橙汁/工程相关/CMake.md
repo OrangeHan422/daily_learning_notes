@@ -1592,3 +1592,10 @@ target_link_dirctories(myPro PRIVATE "${MATH_DIR}/lib")
 #指定需要链接的库
 target_link_libraries(myPro PRIVATE ThirdParty)
 ```
+
+直接使用开源三方库
+
+```cmake
+find_package(protobuf CONFIG REQUIRE) #这些库是可以直接通过apt安装，或者自己安装到usr/local中的，这里以protobuf为例
+```
+
