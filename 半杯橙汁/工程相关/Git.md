@@ -132,8 +132,10 @@ git pull <remote>			# 拉取更新内容
 
 首先需要创建一个空的远程仓库，github会提供下述语句：
 
+> 需要注意的是，本地必须有一次提交，这样才会创建默认分支
+
 ```bash
-git remote add <shortname><url>
+git remote add <shortname><url>	# git remote add origin git@github.com:OrangeHan422/responseName.git
 git branch -M main		# 将本地分支命名为main
 git push -u origin main:main	#将本地的main和远程的origin关联起来
 ```
