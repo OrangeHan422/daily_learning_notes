@@ -312,3 +312,278 @@ void f(){
 f<1, 2, 3, 4, 5>();
 ```
 
+## ch02 类模板
+
+### 2.1 定义类模板
+
+```c++
+template<typename T>
+struct Test{};
+//旧式
+template<class T>
+struct Test{};
+```
+
+### 2.2 使用类模板
+
+```c++
+template<typename T>
+struct Test{};
+
+int main(){
+    Test<void> t;	//ok
+    Test<int> t2;	//ok
+    Test t;			//error
+}
+```
+
+如果存在模板数据成员
+
+```c++
+template<typename T>
+struct Test{
+    T t;
+};
+
+// Test<void> t;  // Error! ----> void t;错误的定义
+Test<int> t2;     
+// Test t3;       // Error!
+Test t4{ 1 };     // C++17 OK！----->c++17增加了类模板实参推导
+```
+
+### 2.3 类模板参数推导
+
+对于普通的应用，和模板函数的实参类型推导一样使用(CV限定的规则也同样适用)
+
+```c++
+template<typename T>
+struct A{
+    A(T,T);
+};
+
+auto y = new A{1,3}; //A<int>
+```
+
+#### 2.3.1 用户定义的推导指引
+
+语法（前面是调用函数的形式，后面是模板声明的形式）：
+
+```c++
+模板名称(类型a)->模板名称<类型b>
+```
+
+需求1：如果类模板推导为int，就让它推导为size_t，如果是指针类型就推导为数组
+
+```c++
+template<typename T>
+struct Test{
+    Test(T t):m_t(t){}
+private:
+    T m_t;
+};
+
+Test(int) -> Test<std::size_t>;
+
+//将指针类型推导为数组
+template<typename T>
+Test(T*)->Test<T[]>;
+
+Test t(1);//Test<std::size_t>
+
+char *p =nullptr;
+Test t1(p);//Test<char[]>
+```
+
+需求2：
+
+```c++
+template<typename T,std::size_t size>
+struct array{
+    T arr[size];
+};
+
+::array arr{1,2,3}; //error
+```
+
+solution:
+
+```c++
+template<typename T,typename... Args>
+array(T t,Args...)->array<T,sizeof...(Args)+1>;//注意形式
+```
+
+### 2.4 有默认实参的模板形参
+
+和函数模板一样
+
+```c++
+template<typename T = int>
+struct X{};
+
+X x;	//CTAD since C++17
+X<> x2;	//before C++17
+```
+
+但是注意一种情况，如果在类内声明一个*有默认实参的类模板类型*的数据成员，不管是否达到C++17，都不能省略`<>`。尽管GCC中可以，但是为了代码的健壮性和跨平台考虑，这种情形不要省略`<>`
+
+```c++
+template<typename T = int>
+struct X{};
+
+struct Test{
+    X x;	// maybe error (clang msvc)
+    X<> x2;	// ok
+    static inline X x3;//maybe error(clang msvc)
+};
+```
+
+非类型模板形参也可以加默认值，但是并不常见
+
+```c++
+template<typename T,std::size_t N = 10>
+struct Arr{
+    T arr[N];
+};
+
+Arr<int> x;	//Arr<int,10>
+```
+
+### 2.5 模板模板形参
+
+语法形式：
+
+```txt
+template < 形参列表 > typename(C++17)|class 名字(可选)            
+template < 形参列表 > typename(C++17)|class 名字(可选) = default   
+template < 形参列表 > typename(C++17)|class ... 名字(可选)  (C++11 起)
+```
+
+使用实例：
+
+```c++
+template<typename T>
+struct X{};
+
+template<template<typename T> typename C>
+struct Test{};
+
+Test<X> test;
+```
+
+#### 2.5.1 模板模板形参
+
+```c++
+template<typename T>
+struct my_array{
+    T arr[10];
+};
+
+template<typename Ty,template<typename T> typename C>
+struct Array{
+    C<Ty> array;
+};
+
+Array<int,my_array>arr; //arr 中是my_array<int>
+```
+
+#### 2.5.2 有默认模板参数的模板模板形参
+
+```c++
+template<typename T>
+struct my_array{
+    T arr[10];
+};
+
+template<typename Ty,template<typename T> typename C = my_array>
+struct Array{
+    C<Ty> array;
+};
+
+Array<int>arr; //arr 中是my_array<int>
+```
+
+#### 2.5.3 有模板参数包的模板模板形参
+
+```c++
+template<typename T>
+struct X{};
+template<typename T>
+struct X2{};
+
+template<template<typename T>typename... TArgs>
+struct Test{};
+
+Test<X,X2,X> test;
+```
+
+配合非类型模板形参也是可以的
+
+```c++
+template<std::size_t N>
+struct X{};
+
+template<template<std::size_t> typename C>
+struct Test{};
+
+Test<X> test;
+
+
+template<typename... Args>
+struct my_array{
+    int arr[sizeof...(Args)];
+};
+
+template<typename T,template<typename... Args> typename C = my_array>
+struct Array{
+    C<T> array;
+};
+
+Array<int> arr;	// arr中的数据成员为my_array<int>
+```
+
+### 2.6 成员函数模板
+
+需要注意，以下情形**不**是成员函数模板,只是普通的成员函数，在模板类实例化的时候实例化为具体的函数
+
+```c++
+template<typename T>
+class Test{
+    void f(T){}
+};
+```
+
+#### 2.6.1 类模板中的成员函数模板
+
+```c++
+template<typename T>
+struct Test{
+    template<typename... Args>
+    void f(Args&&... args){}	//注意这里是万能引用，而不是右值引用
+};
+```
+
+#### 2.6.2 普通类中的成员函数模板
+
+```c++
+struct Test{
+    template<typename... Args>
+    void f(Args&&... args){}	//注意这里是万能引用，而不是右值引用
+};
+```
+
+### 2.7 可变参数类模板
+
+```c++
+template<typename... Args>
+struct X{
+    X(Args... args)
+        :m_value(args...)
+        {}
+    
+    std::tuple<Args...> m_value;
+};
+
+X x{ 1,"2",'3',4. };    // x 的类型是 X<int,const char*,char,double>
+std::cout << std::get<1>(x.value) << '\n'; // 2
+```
+
