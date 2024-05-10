@@ -2203,7 +2203,7 @@ class FileError:public exception
 
 ##### 14.3.4 源码位置（C++20）
 
-在C+20之前都是铜鼓`__FILE__`，`__LINE__`这类宏来记录信息。
+在C+20之前都是通过`__FILE__`，`__LINE__`这类宏来记录信息。
 
 C++20在`<source_location>`中以类的形式，为这些宏提供了替代品。`source_location`有以下公有方法：
 

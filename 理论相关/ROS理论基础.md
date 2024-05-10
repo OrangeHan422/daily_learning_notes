@@ -2731,7 +2731,7 @@ roslaunch 包名 xxx.launch
 
 所有其它标签都是launch的子级
 
-### 3.2.2 node标签
+###  	3.2.2 node标签
 
 `<node>`标签用于指定 ROS 节点，是最常见的标签，需要注意的是: roslaunch 命令不能保证按照 node 的声明顺序来启动节点(节点的启动是多进程的)
 
@@ -2739,15 +2739,15 @@ roslaunch 包名 xxx.launch
 
 - pkg="包名"
 
-  节点所属的包
+  节点所属的包,catkin_create_package时创建
 
 - type="nodeType"
 
-  节点类型(与之相同名称的可执行文件)
+  节点类型(与之相同名称的可执行文件)，cmake文件中的可执行文件名称
 
 - name="nodeName"
 
-  节点名称(在 ROS 网络拓扑中节点的名称)
+  节点名称(在 ROS 网络拓扑中节点的名称)，ros::init中指定的名称
 
 - args="xxx xxx xxx" (可选)
 
@@ -4338,33 +4338,29 @@ ROS 内置的乌龟案例并操作，操作过程中使用 rosbag 录制，录�
 
 创建目录保存录制的文件
 
-```
+```bash
 mkdir ./xxx
 cd xxx
-Copy
 ```
 
 2.开始录制
 
-```
+```bash
 rosbag record -a -O 目标文件
-Copy
 ```
 
 操作小乌龟一段时间，结束录制使用 ctrl + c，在创建的目录中会生成bag文件。
 
 3.查看文件
 
-```
+```bash
 rosbag info 文件名
-Copy
 ```
 
 4.回放文件
 
-```
+```bash
 rosbag play 文件名
-Copy
 ```
 
 重启乌龟节点，会发现，乌龟按照录制时的轨迹运动。

@@ -587,3 +587,485 @@ X x{ 1,"2",'3',4. };    // x 的类型是 X<int,const char*,char,double>
 std::cout << std::get<1>(x.value) << '\n'; // 2
 ```
 
+## ch03 变量模板
+
+> C++14及以上版本支持的变量模板
+>
+> 本质可以理解为全局变量，可以用在编译期的优化
+
+### 3.1 定义变量模板
+
+```c++
+template<typename T>
+T t;
+```
+
+### 3.2使用变量模板
+
+```c++
+template<typename T>
+constexpr T t{};
+
+t<int>;		// constexpr int t = 0;
+
+typename<typename T>
+constexpr T t{66};
+std::cout << t<int> << std::endl;	// 66
+```
+
+**注意：**constexpr附带const属性，所以以下结果为true
+
+```c++
+template<typename T>
+constexpr T t{};
+
+if(1 == std::is_same_v<decltype(t<int>),const int>){
+    std::cout << "true" << std::endl;
+}
+```
+
+> `std::is_same_v`在C++17引入，
+>
+> C++11版本为`std::is_same`，使用方式为`std::is_same<T,U>::value`
+>
+> 大多数C++11版本的type trait库中都是使用`::value`，在C++17中都进行了封装，在原名称基础上加上`_t`(对应`::type`)或者`_v`(对应`::value`).实现为：
+>
+> ```c++
+> template<typename T,typename U>
+> inline constexpr bool is_same_v = is_same<T,U>::value;
+> ```
+
+### 3.3 有默认实参的模板形参
+
+```c++
+template<typename T = int>
+constexpr T v{};
+
+int b = v<>;	// v<int> 即const int v{};
+```
+
+即使使用的是C++17，并且已经提供了模板形参的默认实参 ，依旧要求写明`<>`
+
+### 3.4 非类型模板形参
+
+```c++
+template<std::size_t N>
+constexpr int v = N;
+
+std::cout << v<10> << std::endl;	//constexpr int v = 10;
+
+template<std::size_t N = 66>
+constexpr int v = N;
+
+std::cout << v<> << std::endl;	//constexpr int v = 66;
+std::cout << v<22> << std::endl;	//constexpr int v = 22;
+```
+
+### 3.5 可变参数变量模板
+
+```c++
+template<std::size_t... values>
+constexpr std::size_t arr[]{ values... };
+
+for(const auto& elem: arr<1,2,3>){
+    std::cout << elem << std::endl;//1 2 3
+}
+
+std:cout << std::is_same_v<decltype(arr),const std::size_t[3] << std::endl;
+//msvc输出1，gcc和clang输出0，msvc是正确的
+```
+
+### 3.6 类静态数据成员模板
+
+旧知识回顾：类的静态数据成员需要再类外进行定义（C++17以前）
+
+```c++
+struct Test{
+    static int n;
+};
+
+int Test::n;
+```
+
+或者在C++17以后以inline或者constexpr进行修饰
+
+```c++
+struct X{
+	inline static int n{10};
+};
+
+struct T{
+	constexpr static int n{99};	//constexpr必须初始化
+};
+```
+
+对应的，变量模板也是一样的
+
+```c++
+struct limits{
+    template<typename T>
+    static const T min;
+    //或者inline static T min;
+};
+
+template<typename T>
+const T limits::min = {};	//不使用inline需要进行类外初始化
+```
+
+## ch04 模板全特化
+
+### 4.1 函数模板全特化
+
+示例：如果模板函数的形参类型为double和int，就返回差值，否则返回和
+
+```c++
+template<typename T,typename U>
+auto f(const T& a,const U& b){	//注意，auto作为返回值推导式在C++14提出
+    return a + b;
+}
+
+// 模板全特化，可以只写一个模板标识
+template<>
+auto f(const double& a,const int& b){
+    return a - b;
+}
+
+//或者更清晰的写法
+template<>
+auto f<double,int>(const double& a,const int& b){
+    return a - b;
+}
+```
+
+### 4.2 类模板全特化
+
+```c++
+template<typename T>
+struct is_void{
+    static constexpr bool value  = false;
+};
+
+template<>
+struct is_void<void>{
+    static constexpr bool value = true;
+};
+
+int main(){
+    std::cout << std::boolalpahe << is_void<char>::value << std::endl;//false
+	std::cout << std::boolalpahe << is_void<void>::value << std::endl;//true
+}
+```
+
+模板类需要注意的是，同一个模板实例化出的是不同的类（联想目标代码中不同名字的函数）。而静态数据成员仅仅是同一个类公有的，所以，模板实例化出来的类中的同名静态数据成员不是同一个！
+
+同时，也可以模仿C++17实现`_v`版本
+
+```c++
+template<typename T>
+struct is_void{
+    static constexpr bool value  = false;
+};
+
+template<>
+struct is_void<void>{
+    static constexpr bool value = true;
+};
+
+template<typename T>
+constexpr bool is_void_v = is_void<T>::value;
+
+int main(){
+    std::cout <<std::boolalpha<< is_void_v<char> << '\n';    // false
+    std::cout << std::boolalpha << is_void_v<void> << '\n';  // true
+}
+```
+
+再次强调，类模板的全特化就是写了一个全新的类！！
+
+### 4.3 变量模板全特化
+
+```c++
+template<typename T>
+constexpr const char* s = "char*";
+
+template<>
+constexpr const char* s<void> = "void";
+
+template<>
+constexpr const char* s<int> = "int";
+
+std::cout << s<void> << std::endl;			// void
+std::cout << s<int> << std::endl;			// int
+std::cout << s<std::string> << std::endl;	// char *
+```
+
+同样，实现C++17的`_v`版本
+
+```c++
+template<typename T>
+constexpr bool is_void_v = false;
+
+template<>
+constexpr bool is_void_v<void> = true;
+
+std::cout << std::boolalpha << is_void_v<char> << std::endl;//false
+std::cout << std::boolalpha << is_void_v<void> << std::endl;//true
+```
+
+**注意**
+
+特化必须在隐式实例化之前
+
+```c++
+template<typename T>
+void f(const T&){}
+
+void f2(){
+    f(1);	//注意，这里会进行隐式实例化
+}
+
+template<>
+void f<int>(const ints&){}	//error,f<int>在前面已经有了实例化
+```
+
+模板类型也可以像其他不完整类型一样使用
+
+```c++
+template<typename T>
+class X;
+template<>
+class X<int>; // 特化声明，未定义
+
+X<int>* p;	//指向不完整类型的指针，ok
+X<int> x;	//错误，不完整的类型
+```
+
+### 4.4 成员的特化
+
+```c++
+//主模板
+template<typename T>
+struct Base{
+    struct NormalDerive {};
+    
+    template<typename U>
+    struct TemplateDerive {};
+};
+
+// 特化主模板
+template<>
+struct Base<void>{
+    void f();
+}
+
+void Base<void>::f(){}
+
+//特化成员类
+template<>
+struct Base<char>::NormalDerive{
+  void f();  
+};
+
+void Base<char>::NormalDerive::f(){
+    ...
+}
+
+// 特化成员类模板
+//成员类模板定义
+template<>
+template<typename U>
+struct Base<int>::TemplateDerive{
+    void f();
+};
+
+template<>
+template<typename U>
+void Base<int>::TemplateDerive<U>::f(){
+	...
+}
+
+//类的成员函数模板的特化
+struct X{
+    template<typename T>
+    void f(T){}
+    
+    template<>		//类内特化
+    void f<int>(int){
+        std::cout << "f<int>(int)" << std::endl;
+    }
+};
+
+
+template<>
+void X::f<double>(double){
+    std::cout << "f<double>(double)" << std::endl;
+}
+
+X x;
+x.f(1);	//f<int>(int)
+x.f(1.);//f<double>(double)
+
+//类模板的成员函数模板的特化
+template<typename T>
+struct X{
+  template<typename U>
+    void f(U){}
+    
+    template<>		//类内特化
+    void f<int>(int){
+        std::cout << "f<int>(int)" << std::endl;
+    }
+};
+
+template<>		//类外特化
+template<>
+void X<void>::f<double>(double){
+    std::cout << "f<double>(double)" << std::endl;
+}
+
+X<void> x;
+x.f(1);		//f<int>(int)
+x.f(1.2);	//f<double>(double)
+```
+
+极其不专业的总结：全特化的形式就是`template<>`，再写清楚实例化模板的类型
+
+## ch05 模板偏特化
+
+用途：让模板实参具有一些相同特征的可以自定义，而非像全特化一样指明具体类型，值
+
+注意：***函数模板没有偏特化，只有类模板和变量模板可以***。
+
+### 5.1 变量模板偏特化
+
+例一：
+
+```c++
+template<typename T>
+const char*s = "template";
+
+//偏特化指针类型
+template<typename T>
+const char* s<T*> = "pointer";
+
+//偏特化数组类型
+template<typename T>
+const char* s<T[]> = "array";
+```
+
+例二：
+
+```c++
+template<typename T,typename U>
+const char*s = "template";
+
+template<typename U>
+const char* s<int,U> = "T == int";
+```
+
+### 5.2 类模板偏特化
+
+```c++
+template<typename T,typename U>
+struct X{
+    void func();
+};
+
+template<typename T,typename U>
+void X<T,U>::func(){}	//类外定义
+
+//	偏特化
+template<typename T>
+struct X<void,T>{
+    void func_void();
+};
+
+template<typename T>
+void X<void,T>func_void(){}	//类外定义,不推荐，较为繁琐
+
+X<int,int> x;
+x.func();
+X<void,int> x;
+x.func_void();
+```
+
+较为复杂的例子，gcc无法编辑，属于编译器的问题
+
+外围类全特化，成员类偏特化
+
+```c++
+template<typename T,std::size_t N>
+struct Base{
+    template<typename T,typename U>
+    struct Derive{};
+};
+
+template<>	//外部类全特化
+template<typename T>
+struct Base<int,20>::Derive<int,T>{
+    void f() const {};	//该函数仅存在于Base<int,20>中的Derive<int,T>偏特化类中
+}
+
+int main(){
+    Base<int,20>::Derive<int,void>test;
+    test.f();		//ok
+    
+   	Base<int,99>::Derive<int,void>test2;
+    test2.f();		//error,全特化没对上
+    
+    Base<int,99>::Derive<void,void>test2;
+    test2.f();		//error,偏特化没对上
+}
+```
+
+> gcc依旧不能通过编译，并非语法问题
+
+### 5.3 sample std::is_same_v
+
+```c++
+template<typename,typename>
+inline constexpr bool is_same_v = false;
+
+template<typename T>	//	偏特化
+inline constexpr bool is_same_v<T,T> = true;	
+```
+
+## ch06 模板显式实例化解决模板分文件的问题
+
+### 6.1 函数模板显式实例化
+
+```c++
+template 返回类型 名称<实参列表>(形参列表);
+template 返回类型 名字(形参列表);
+extern template 返回类型 名称<实参列表>(形参列表)
+extern template 返回类型 名字(形参列表);
+```
+
+示例：
+
+```c++
+//template_func.h
+template<typename T>
+void func(T);
+
+//template_func.cpp
+template<typename T>
+void func(T){ std::cout << typeid(T).name() << std::endl; }
+
+template void func<int>(int);
+template void func<>(char);
+template void func(double);
+```
+
+```c++
+#include "template_func.h"
+
+int main(){
+    func(1);
+    func('c');
+    func(1.23);
+}
+```
+
+
+
