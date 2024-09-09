@@ -768,6 +768,138 @@ int main() {
 
 #### 观察者模式
 
-观察者模式又称为发布-订阅模式，定义了一种一对多的依赖关系，让多个观察者对象同时监听同一个主题对象。当主题对象状态发生变化的时候，所有观察者都得到通知，并自动更新。
+观察者模式又称为发布-订阅模式，定义了一种一对多的依赖关系，让多个观察者对象同时监听同一个主题对象。当主题对象状态发生变化的时候，所有观察者都得到通知，并自动更新。设计模式中有两个角色：
+
++ 主题(subject):被观察的对象，维护一组观察者，如果主题发生改变，将通知组内的观察者。主题需要负责**注册、删除和通知观察者**
++ 观察者(observer):当被观察的主题发生变化的时候，收到通知并执行反应任务
 
 ![image-20240905194206579](./images/image-20240905194206579.png)
+
+观察者模式的好处：将观察者和主题解耦，就类似研究生和导师，导师是一个主题，学生是观察者，导师有新的想法了，群里喊一声，所有的观察者开始执行反应任务，有的日夜颠倒，有的躺平睡觉，各自的操作导师并不知情。同样的，导师自己的工作内容观察者也并不知情。对于解耦就像是，导师可以随时让研究生滚蛋，找另一个研究生交接一下不会影响整体系统的工作。同样，研究生受不了导师，也可以换另一个导师，新的导师和自己的交互仍旧是任务发布的形式，自己卷还是躺对新的导师依旧没有直接影响，整个系统依旧可以正常工作
+
+简单实现：
+
+```c++
+class AbstractOb;
+
+class AbstractSub{
+public:
+    virtual void registerOb(AbstractOb*) = 0;
+    virtual void removeOb(AbstractOb*) = 0;
+    virtual void notifyOb() = 0;
+};
+
+class AbstractOb{
+public:
+    virtual void reaction(std::string_view info) = 0;
+};
+
+class Sub:public AbstractSub{
+public:
+    void registerOb(AbstractOb* ob) override{
+        obs_.push_back(ob);
+    }
+
+    void removeOb(AbstractOb* ob) override{
+        for(auto iter = obs_.begin(); iter != obs_.end() ; ++iter){
+            if(*iter = ob){
+                obs_.erase(iter);
+            }
+        }
+    }
+
+    void notifyOb() override{
+        for(const auto ob: obs_){
+            ob->reaction(info_);
+        }
+    }
+
+    void updateInfo(std::string_view str){
+        info_ = str;
+        notifyOb();
+    }
+
+private:
+    std::vector<AbstractOb*> obs_;
+    std::string info_;
+};
+
+class Ob:public AbstractOb{
+public:
+    void reaction(std::string_view info) override{
+        std::cout << "Ob" <<  this << " reaction: " << info << std::endl;
+    }
+};
+
+
+int main() {
+    AbstractSub* subject = new Sub();
+    AbstractOb* ob1 = new Ob();
+    AbstractOb* ob2 = new Ob();
+    subject->registerOb(ob1);
+    subject->registerOb(ob2);
+    (dynamic_cast<Sub*>(subject))->updateInfo("SB");
+}
+```
+
+#### 策略模式
+
+简单来说，策略模式指的是对于同一个问题，提供不同的算法，但是完成的工作相同，即用户调用的是一个抽象接口，具体可以是任何一种策略实现
+
+使用场景：
+
++ 当系统需要根据业务场景，需要在几种算法当中动态的选择时
++ 当代码中存在大量的条件判断，条件判断的区别仅仅在于行为，可以通过策略模式消除这些条件语句
+
+结构应该如下：
+
++ 策略类：定义所有支持算法的公共接口
++ 具体策略类：实现具体的算法
++ 上下文类：包含一个策略实例，并在需要的时候调用策略对象的方法。
+
+![image-20240909183424036](./images/image-20240909183424036.png)
+
+简单实现：
+
+```c++
+class AbstractStrategy{
+public:
+    virtual void interface() = 0;
+};
+
+class ConcreteStrategy1:public AbstractStrategy{
+public:
+    void interface() override{
+        std::cout << "strategy 1" << std::endl;
+    }
+};
+
+class ConcreteStrategy2:public AbstractStrategy{
+public:
+    void interface() override{
+        std::cout << "strategy 2" << std::endl;
+    }
+};
+
+class Context{
+public:
+    explicit Context(AbstractStrategy* strategy)
+    :strategy_(strategy)
+    {}
+
+    void contextInterface(){
+        strategy_->interface();
+    }
+private:
+    AbstractStrategy* strategy_;
+};
+
+
+int main() {
+    Context* CA = new Context(new ConcreteStrategy1());
+    CA->contextInterface();
+    Context* CB = new Context(new ConcreteStrategy2());
+    CB->contextInterface();
+}
+```
+
