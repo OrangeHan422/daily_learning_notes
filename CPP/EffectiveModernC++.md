@@ -3088,5 +3088,455 @@ auto fut = std::async(doAsyncWork); //基于任务的方式，“fut”表示“
 `std::async`单参数版本的调用对函数的执行不一定是异步的，对于`std::async`函数的启动策略有两个枚举值可供选择：
 
 + `std::launch::async`：启动函数**必须**异步执行，即会自动创建新的线程
-+ `std::launch::deferred`:启动函数仅当在`std::async`返回的`std::future`上调用`get`或者`wait`时才执行，即侧重于*惰性求值*。启动函数的执行会被推迟，当`get`或者`wait`被调用的时候，启动函数同步执行，即调用方会阻塞，一直等到启动函数结束。如果没有调用`get`或者`wait`,启动函数就不会执行。
++ `std::launch::deferred`:启动函数仅当在`std::async`返回的`std::future`上调用`get`或者`wait`时才执行，即侧重于*惰性求值*。启动函数的执行会被推迟，当`get`或者`wait`被调用的时候，启动函数同步执行，即调用方会阻塞，一直等到启动函数结束。如果没有调用`get`或者`wait`,启动函数就不会执行。(需要注意的是这里的future，因为future可以用来构造`std::shared_future`，而`std::shared_future`可以用来拷贝，所以最后调用wait或者get的future对象，并不一定是通过`std::async`返回的future对象)
 
+对于`std::async`的默认启动策略，取决于操作系统内核的调度，即或操作,以下两种方式等价：
+
+```c++
+auto fut1 = std::async(f);                      //使用默认启动策略运行f
+auto fut2 = std::async(std::launch::async |     //使用async或者deferred运行f
+                       std::launch::deferred,
+                       f);
+```
+
+这样做的好处是，负载是由操作系统进行决策，相对更方便，但是也存在一定的影响:
+
+假如在线程t中创建`std::async`任务，由于其默认执行策略不固定，所以：
+
++ 不确定该任务是否会和线程t并发执行
++ 如果t对future进行调用，无法确定任务是在当前线程t中执行的，还是在另一个线程执行的
++ 无法预测任务是否已经执行过了。不能确保程序中哪里对future调用了get或者wait
+
+这样做对于`thread_local`变量尤其危险，因为不确定任务访问的是哪一个线程的local变量
+
+另一个问题是，默认策略可能会导致忙等待：
+
+```c++
+using namespace std::literals;      //为了使用C++14中的时间段后缀；参见条款34
+
+void f()                            //f休眠1秒，然后返回
+{
+    std::this_thread::sleep_for(1s);
+}
+
+auto fut = std::async(f);           //异步运行f（理论上）
+
+while (fut.wait_for(100ms) !=       //循环，直到f完成运行时停止...
+       std::future_status::ready)   //但是有可能永远不会发生！
+{
+    …
+}
+```
+
+上述可能存在的问题是，如果当前系统的资源比较宽松，那么没有问题。但是，当系统资源紧缺，操作系统将启动策略设置为了`std::launch::deferred`，那么while就会忙等待，因为wait_for会返回`std::launch::deferred`，会形成一个抽象的死锁。任务在等待当前线程调用get或者wait从而执行（惰性任务），而当前线程在等待任务执行结束。
+
+解决方法只能是通过if判断
+
+```c++
+auto fut = std::async(f);               //同上
+
+if (fut.wait_for(0s) ==                 //如果task是deferred（被延迟）状态
+    std::future_status::deferred)
+{
+    …                                   //在fut上调用wait或get来异步调用f
+} else {                                //task没有deferred（被延迟）
+    while (fut.wait_for(100ms) !=       //不可能无限循环（假设f完成）
+           std::future_status::ready) {
+        …                               //task没deferred（被延迟），也没ready（已准备）
+                                        //做并行工作直到已准备
+    }
+    …                                   //fut是ready（已准备）状态
+}
+```
+
+所以默认启动策略只有在以下情况才可以使用：
+
++ 任务不需要和调用get或者wait的线程并行执行
++ 对于`thread_local`变量的读写无所谓
++ 确定`future`会被调用wait或者get，或者确定任务永远无法执行也没问题（不需要执行了，还写这玩意干嘛？）
++ 在必要的地方对惰性执行进行了判断，如上例
+
+对于一定需要异步执行的任务，可以封装以下工具：
+
+```c++
+//C++11 版本
+template<typename F, typename... Ts>
+inline
+std::future<typename std::result_of<F(Ts...)>::type>
+reallyAsync(F&& f, Ts&&... params)          //返回异步调用f(params...)得来的future
+{										// F为函数，Ts为函数的参数
+    return std::async(std::launch::async,	// std::result_of<F(Ts...)>::type为该任务返回的future模板类
+                      std::forward<F>(f),
+                      std::forward<Ts>(params)...);
+}
+//C++14版本
+template<typename F, typename... Ts>
+inline
+auto                                        // C++14
+reallyAsync(F&& f, Ts&&... params)
+{
+    return std::async(std::launch::async,
+                      std::forward<F>(f),
+                      std::forward<Ts>(params)...);
+}
+```
+
+总结：`std::async`启动策略是不定的，根据系统资源进行调整的，所以在对异步性要求明确的情况下，应该指定启动策略
+
+### 条款37：使所有的`std::thread`在所有路径下都`unjoinable`
+
+不可结合的`std::thread`有以下情形：
+
++ 默认构造的，没有和线程实体绑定，如：`std::thread t`
++ 已经被`std::move`掉的
++ 已经被`join`掉的
++ 已经被`detach`掉的
+
+假设有一个任务`doWork`，需要一个谓词函数以及一个`int max`作为形参，对于所有满足谓词函数的0-max值进行计算处理。这里谓词函数和计算都十分耗时，因此考虑并发执行
+
+```c++
+constexpr auto tenMillion = 10'000'000;        //C++14可以通过'来分割数字
+
+bool doWork(std::function<bool(int)> filter,    //返回计算是否执行；
+            int maxVal = tenMillion)            //std::function见条款2
+{
+    std::vector<int> goodVals;                  //满足filter的值
+	
+    //单独拉线程执行谓词函数，并填充vector
+    std::thread t([&filter, maxVal, &goodVals]  //填充goodVals
+                  {
+                      for (auto i = 0; i <= maxVal; ++i)
+                          { if (filter(i)) goodVals.push_back(i); }
+                  });
+
+    auto nh = t.native_handle();                //使用t的原生句柄
+    …                                           //来设置t的优先级
+
+    if (conditionsAreSatisfied()) {
+        t.join();                               //等t完成
+        performComputation(goodVals);
+        return true;                            //执行了计算
+    }
+    return false;                               //未执行计算
+}
+```
+
+上述存在的问题是，如果最后走到了false分支返回，栈函数结束，而t还没有join或者detach，此时t还是joinable得状态。栈结束的时候，**t调用析构函数，如果t.joinable()就会直接terminate终止程序**。
+
+> 为什么需要手动管理detach和join是因为防止内存问题，上例中如果隐式detach掉，那么线程会在已经销毁的栈空间上进行操作！
+
+解决方法就是RAII，可以自行封装如下类(C++20引入的jthread)：
+
+```c++
+class ThreadRAII {
+public:
+    enum class DtorAction { join, detach };     //enum class的信息见条款10
+    
+    ThreadRAII(std::thread&& t, DtorAction a)   //析构函数中对t实行a动作
+    : action(a), t(std::move(t)) {}
+
+    ~ThreadRAII()
+    {                                           //可结合性测试见下
+        if (t.joinable()) {
+            if (action == DtorAction::join) {
+                t.join();
+            } else {
+                t.detach();
+            }
+        }
+    }
+
+    std::thread& get() { return t; }            //见下
+
+private:
+    DtorAction action;
+    std::thread t;
+};
+```
+
+注意，显示声明了析构函数，编译器便不会再生成移动构造函数，如果像使用编译器提供的移动构造函数，可以使用`default`关键词（依旧是`rule of five` 和`rule of zero`）
+
+### 条款38：关注不同线程句柄的析构行为
+
+句柄：可结合的`std::thread`以及不是`std::launch::deferred`的`std::async`都可以视为系统线程（软件线程和硬件线程中间层）的句柄（类似pthread中的pthread_t）
+
+前置知识：`std::promise`,可以将其看做调用者和被调用者之间的一个管道。被调用者通过`std::promise`将数据传递给`std::future`
+
+```c++
+#include <iostream>
+#include <future>
+void async_task(std::promise<int>&& prom) {
+    try {
+        // 计算结果
+        int result = 42;
+        prom.set_value(result);  // 设置结果
+    } catch (...) {
+        prom.set_exception(std::current_exception());  // 设置异常
+    }
+}
+
+int main() {
+    std::promise<int> prom;
+    std::future<int> fut = prom.get_future();
+
+    // 启动异步任务
+    std::thread t(async_task, std::move(prom));
+
+    // 获取结果
+    try {
+        int result = fut.get();
+        std::cout << "Result: " << result << '\n';
+    } catch (const std::exception& e) {
+        std::cout << "Exception: " << e.what() << '\n';
+    }
+
+    t.join();
+    return 0;
+}
+```
+
+`std::thread` 和`std::future`的析构有些不同，`std::thread`析构可能会终止程序，但是`std::future`的析构，表现的行为像是执行了`join`或者`detach`
+
+对于`future`，调用者和被调用者之间的通信信道可以模拟如下：
+
+>  caller(std::future) <-----------------------------(std::promise)callee
+
+但是，对于任务执行的结果，不能存储在被调用者的`promise`以及调用者的`future`中
+
+如果存在被调用者的`promise`中，该变量是一个局部变量，在任务执行结束后会被回收。
+
+如果存在调用者的`future`中，该`future`可能被用来构造`shared_future`,所有权转移给了`shared_future`后，可能会被复制多份，那么`future`的生存周期和最后一个引用一样长。这些引用那些用来存储被调用者的结果就成一个问题了。
+
+因此，这个结果的存储，应该是一个共享区，即在堆上。标准库对该共享区没有要求，不同厂家的实现可能不同。因此，实际上通信信道的模型应该如下：
+
+> caller(std::future) <---------shared_state(callee's result)<--------------(std::promise)calee
+
+`future`句柄的析构和该共享区息息相关：
+
++ 对于多个`future`（即通过`shared_future`复制出来的），引用了共享区的最后一个`future`会阻塞住（类似`join`操作）
++ 同样，多个`future`中，其他的`future`会简单的析构（类似`detach`）
+
+正常情况下，`future`的析构会简单销毁对象，但是出现以下情形的时候，会出现上述特殊行为：
+
++ 关联到调用`std::async`而创建出的共享状态
++ 任务启动策略为`std::launch::async`
++ 该`future`是关联共享状态的最后一个`future`对象，该对象会阻塞住。对于普通的`future`，只有这一种情况（即类join行为）。但是对于`shared_future`,则行为为上述特殊行为（即除了最后一个join，其他都是detach）
+
+`future`提供的API无法确定当前对象是否是最后一个`future`,即当前对象是否会阻塞析构，因此会导致容器或者类的析构被阻塞：
+
+```c++
+//这个容器可能在析构函数处阻塞，因为其中至少一个future可能引用由std::async启动的
+//未延迟任务创建出来的共享状态
+std::vector<std::future<void>> futs;    //std::future<void>相关信息见条款39
+
+class Widget {                          //Widget对象可能在析构函数处阻塞
+public:
+    …
+private:
+    std::shared_future<double> fut;
+};
+```
+
+为了确保`future`的析构正常执行，而不出现以上"异常"行为，可以使用`std::packaged_task`对任务进行包装(wrapping)
+
+```c++
+int calcValue();                //要运行的函数
+std::packaged_task<int()>       //包覆calcValue以异步运行
+    pt(calcValue);
+auto fut = pt.get_future();     //从pt获取future
+```
+
+`packaged_task`和`future`结合的方式和`std:async`都可以用来执行异步任务，两者一般不会同时出现
+
+`packaged_task`不可拷贝，所以在传递给`thread`必须使用移动
+
+对于和`packaged_task`结合的`future`，通常不需要考虑如何销毁，因为通常会在代码中显式的判断：
+
+```c++
+{                                   //开始代码块
+    std::packaged_task<int()>
+        pt(calcValue); 
+    
+    auto fut = pt.get_future(); 
+    
+    std::thread t(std::move(pt));   //见下
+    …
+}                                   //结束代码块
+```
+
+在`...`这里,会有三种情况（都不需要考虑fut的析构）
+
++ 没有`join`或者`detach`:程序会因为线程析构终止
++ `join`：阻塞，等待执行结束再析构
++ `detach`：解除关联（既然detach掉了，结果肯定也不需要了）
+
+### 条款39：对于一次性事件通信考虑使用void 的future
+
+考虑如下情形，在多线程程序中，一个异步任务在等待另外一个线程发送的信号才可以继续执行，等待中的任务称为反应任务，发送信号的任务称为检测任务，代码可以简单模拟如下：
+
+```c++
+std::condition_variable cv;         //事件的条件变量
+std::mutex m;                       //配合cv使用的mutex
+
+//对于检测任务，只需要发送信号就好
+…                                   //检测事件
+cv.notify_one();                    //通知反应任务
+
+//对于反应任务
+…                                       //反应的准备工作
+{                                       //开启关键部分
+
+    std::unique_lock<std::mutex> lk(m); //锁住互斥锁
+
+    cv.wait(lk);                        //等待通知，但是这是错的！
+    
+    …                                   //对事件进行反应（m已经上锁）
+}                                       //关闭关键部分；通过lk的析构函数解锁m
+…                                       //继续反应动作（m现在未上锁）
+```
+
+对于上述代码，在`wait`处会存在**代码异味**的问题，即即使代码正常运行，但是有些事情却是不对的。在该处这种问题是因为使用互斥锁。在这里会出现两种问题：
+
++ 如果检测任务在反应任务调用`wait`之前就进行了通知，反应任务会被永久挂起。
++ 虚假唤醒问题，不止C++，其他语言也会存在，即，即使反应任务在等待，并且没有被通知，反应任务也有可能会被唤醒（**但是Linux的条件变量的实现保证了不会出现虚假唤醒的问题**）。
+
+为了防止虚假唤醒，可以使用C++提供的API：
+
+```c++
+cv.wait(lk, []{ return whether the evet has occurred; });
+```
+
+更为基础的方法是，使用一个共享的布尔变量，反应任务通过`while`循环来等待，这样做虽然简单，但是CPU的空转着实浪费
+
+所以，要发挥杂种优势，将条件变量和布尔值合起来使用：
+
+```c++
+std::condition_variable cv;             //跟之前一样
+std::mutex m;
+bool flag(false);                       //不是std::atomic
+…      //检测某个事件
+{
+    std::lock_guard<std::mutex> g(m);   //通过g的构造函数锁住m
+    flag = true;                        //通知反应任务（第1部分）
+}                                       //通过g的析构函数解锁m
+cv.notify_one();                        //通知反应任务（第2部分）
+
+//反应任务
+…                                       //准备作出反应
+{                                       //跟之前一样
+    std::unique_lock<std::mutex> lk(m); //跟之前一样
+    cv.wait(lk, [] { return flag; });   //使用lambda来避免虚假唤醒
+    …                                   //对事件作出反应（m被锁定）
+}
+…                                       //继续反应动作（m现在解锁）
+```
+
+这样既解决了虚假唤醒的问题，也解决了CPU空转的问题，但是不够优雅
+
+回看条款38，`std:future`和`std::promise`的机制类似管道，所以，可以尝试让反应任务在检测任务设置的`future`上进行`wait`来避免使用条件变量，互斥变量和布尔值
+
+## 第八章 微调
+
+### 条款41：对于移动成本低并且经常需要拷贝的可拷贝参数，考虑使用按值传递
+
+有些参数的形参是可以拷贝的，如下例：
+
+```c++
+class Widget {
+public:
+    void addName(const std::string& newName)    //接受左值；拷贝它
+    { names.push_back(newName); }
+
+    void addName(std::string&& newName)         //接受右值；移动它
+    { names.push_back(std::move(newName)); }   
+    …
+private:
+    std::vector<std::string> names;
+};
+```
+
+这样做会导致代码维护难度加大，并且如果函数不能内联，也会出现代码膨胀的问题。
+
+一种方法是使用通用引用来解决：
+
+```C++
+class Widget {
+public:
+    template<typename T>                            //接受左值和右值；
+    void addName(T&& newName) {                     //拷贝左值，移动右值；
+        names.push_back(std::forward<T>(newName));  //std::forward的使用见条款25
+    }
+};
+```
+
+这样做虽然代码看起来精简了，但是可能存在一些问题：
+
++ 模板函数实例化的时候会出现更多的函数
++ 有些参数不能使用通用引用（条款30）
++ 如果出错，编译器的提示会让人爽到飞起
+
+对于这种问题，解决方式可能有点"违背准则"，那就是按值传递
+
+```c++
+class Widget {
+public:
+    void addName(std::string newName) {         //接受左值或右值；移动它
+        names.push_back(std::move(newName));
+    }
+}
+```
+
+这样做看起来会增加开销，在C++98中的确是的，但是在C++11之后，对于实参，如果是左值，那么会进行拷贝构造，如果是右值，则会进行移动构造。如：
+
+```c++
+Widget w;
+…
+std::string name("Bart");
+w.addName(name);            //使用左值调用addName,实参是一个左值，所以形参调用string(const string&)
+…
+w.addName(name + "Jenne");  //使用右值调用addName,实参通过+之后是一个临时变量（右值），所以形参调用string(const string&&)
+```
+
+很优雅，现在来对比三种方式的性能：
+
+```c++
+class Widget {                                  //方法1：对左值和右值重载
+public:
+    void addName(const std::string& newName)
+    { names.push_back(newName); } // rvalues
+    void addName(std::string&& newName)
+    { names.push_back(std::move(newName)); }
+    …
+private:
+    std::vector<std::string> names;
+};
+
+class Widget {                                  //方法2：使用通用引用
+public:
+    template<typename T>
+    void addName(T&& newName)
+    { names.push_back(std::forward<T>(newName)); }
+    …
+};
+
+class Widget {                                  //方法3：传值
+public:
+    void addName(std::string newName)
+    { names.push_back(std::move(newName)); }
+    …
+};
+Widget w;
+…
+std::string name("Bart");
+w.addName(name);                                //传左值
+…
+w.addName(name + "Jenne");                      //传右值
+```
+
+
+
++ **使用重载的方式**：无论实参是左值还是右值，调用都会绑定到一个叫newName的形参变量上，如果是左值，那么一次拷贝。如果是右值，那么一次移动（这里的拷贝和移动是在push_back的时候，因为形参只是一个引用，忽略开销）
++ **使用通用应用**：由于使用了std::forward,所以开销和上述一样，左值一次拷贝，右值一次移动
++ **使用按值传递**：在和形参结合的时候，左值一次拷贝，右值一次移动。在函数体内，进行push_back的时候，左值右值都是一次移动
+
+综上，不管左值实参还是右值实参，使用按值传递都会多一次移动。

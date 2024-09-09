@@ -2883,7 +2883,7 @@ roslaunch 包名 xxx.launch
 
   加载或导出到的 yaml 文件
 
-- param="参数名称"
+- param="参数名称
 
 - ns="命名空间" (可选)
 
