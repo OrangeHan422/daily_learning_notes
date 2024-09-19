@@ -142,3 +142,190 @@ const unsigned long num_threads = hardware_threads != 0 ? hardware_threads:2;//�
 
 # 第三章：在线程间共享数据
 
+## 3.2 使用互斥量保护共享数据
+
+### 3.2.1 C++中使用互斥量
+
+C++通过`std::mutex`创建互斥量，`lock()`和`unlock()`进行上锁和解锁。但是和堆对象一样，不推荐直接使用。更推荐使用RAII语法的模板类`std::lock_guard`，两种类都在`<mutex>`中声明,需要注意的是，如果希望对锁的粒度进行减小，可以使用`std::unique_lock`，基础用法一致，但是`std::unique_lock`可以通过成员函数`unlock()`手动的提前进行解锁，当然unique_lock会维护一个锁的状态信息，属于是内存换性能了。RAII基本使用：
+
+```c++
+std::mutex mutex;
+
+
+void func(){
+    std::lock_guard<std::mutex> lk(mutex);
+    ...
+}
+```
+
+使用互斥锁需要关注的一个常见陷阱是，如果函数返回了被保护数据的引用或者指针，此时数据的保护就形同虚设了。
+
+### 3.2.2 精心组织代码老保护共享数据
+
+防止返回指针或引用的方法就是不返回，但是仍然需要注意，比如，成员函数是否通过指针或者引用的方式来进行调用被保护的数据。更危险的是：将被保护数据作为一个运行时的参数，如：
+
+```c++
+class NakedData{
+public:
+    void doSometing();
+private:
+    int num_;
+    std::string str_;
+};
+
+class ProtectedData{
+public:
+    // 本意是在保护下处理数据，但是如果传进来的函数参数是引用形式，就gg了,比如下面的函数
+    template <typename Function>
+    void processData(Function&& func){
+        std::lock_guard<std::mutex> lk(mutex_);
+        func(naked_data_);
+    }
+private:
+    NakedData naked_data_;
+    std::mutex mutex_;
+};
+
+//这里通过引用来获取裸数据的指针
+NakedData* g_naked_data;
+void maliciousFunc(NakedData& naked_data){
+    g_naked_data = &naked_data;
+}
+
+ProtectedData p;
+void foo(){
+    //通过传入函数将被保护数据的指针传递出来给了全局变量
+    p.processData(std::move(maliciousFunc));
+    //I'm free!!
+    g_naked_data->doSometing();
+}
+```
+
+所以在使用互斥量的时候，需要注意将指针或引用返回、作为参数、传递给全局/静态变量的情况，这种情况下，系统的维护只能靠脑袋了。
+
+### 3.2.3 发现接口内在的条件竞争
+
+最形象的就是工作中使用的SafeQueue(所有的操作都上了锁)其实并不Safe，比如：
+
+```c++
+if(!que.empty()){ //此时条件成立
+    //在此时另一个线程取走了最后一个元素
+    ...
+    auto elem = que.top();//抛出异常
+}
+```
+
+类似这种程序结果依赖多线程代码的执行顺序的情况还有很多，就像408中的a+b的问题一样。
+
+更加麻烦的问题是，如果队列元素很大，比如`stack<std::vecotr<std::string>>`，在执行pop（自己设计的pop直接弹出元素，而非标准库中返回void）的时候，拷贝构造的时候系统就处于重度负荷的情况。如果此时在拷贝的过程出现内存问题，从而出现了异常呢（虽然在新标准下这种情况更不太可能了，但还是需要注意一下）。此时队列中的元素已经弹出，这就会造成数据丢失。标准库为了防止这种做法是提供了top和pop，即将操作分开了。但是这样对于条件竞争的问题可是要了老命了。但是还有一些选项可以选择
+
+**选项1 传入引用参数**
+
+这个和工作中的SafeQueue是一样的，就是通过引用参数来进行操作，如：
+
+```c++
+std::vector<int> result;
+some_stack.pop(result); //pop(T& )
+```
+
+大多数情况下，这样做是最方便的，也没有什么大问题。但是缺点也很明显，一个是效率问题，总是需要先构造一个对象。另一个是构造问题，有些构造需要的参数可能在代码阶段不一定能用。另一个是赋值问题，这种方法操作的元素必须要求元素支持移动或者拷贝构造的操作，但是很多自定义类并没有提供重载。
+
+**选项2 无异常抛出的拷贝/移动构造函数**
+
+使用`std::is_no_throw_copy_constructible`和'std::is_nothrow_move_constructible'类型特征，让移动/拷贝构造函数不抛出异常。但是很多用户定义类型存在可抛出异常的拷贝构造函数，没有移动构造函数。
+
+**选项3 返回指向弹出值的指针**
+
+另一个方法是返回指向弹出元素的指针，注意，这种方法针对的是数据类型远大于原生类型的情况，否则会导致性能下降。缺点是需要自己对对象的内存分配进行管理，使用`std::shared_ptr`是个不错的选择。
+
+**选项4 1+3 或 1+2**
+
+新版本的标准库好像就是这么做的，即返回加引用参数。
+
+一个简答的线程安全的堆栈类定义(prototype)：
+
+```c++
+struct EmptyStackException:std::exception{
+    const char* what() const throw();
+};
+
+template<typename T>
+class ThreadSafeStack{
+public:
+    ThreadSafeStack();
+    ThreadSafeStack(const ThreadSafeStack&);
+    ThreadSafeStack& operator=(const ThreadSafeStack&) = delete;
+
+    void push(T new_value);
+    //较大值
+    std::shared_ptr<T> pop();
+    //正常值
+    void pop(T& value);
+    bool empty() const;
+};
+```
+
+基于`std::stack<>`的简单封装实现线程安全的堆栈
+
+```c++
+struct EmptyStackException:std::exception{
+    const char* what() const throw(){
+        return "empty stack";
+    }
+};
+
+template<typename T>
+class ThreadSafeStack{
+public:
+    ThreadSafeStack()
+    :stack_(std::stack<T>()){}
+
+    ThreadSafeStack(const ThreadSafeStack& rhs){
+        std::lock_guard<std::mutex> lk(mutex_);
+        stack_ = rhs.stack_;
+    }
+    //栈不应该有赋值操作
+    ThreadSafeStack& operator=(const ThreadSafeStack&) = delete;
+
+    //注意，这里频繁操作转移，使用了Effective Mordern中条款41的技巧
+    void push(T new_value){
+        std::lock_guard<std::mutex> lk(mutex_);
+        stack_.push(new_value);
+    }
+    //较大值
+    std::shared_ptr<T> pop(){
+        std::lock_guard<std::mutex> lk(mutex_);
+        //pop前检查是否为空
+        if(stack_.empty()){
+            throw EmptyStackException();
+        }
+        //在修改堆栈前，分配出返回值
+        const std::shared_ptr<T> res(std::make_shared<T>(stack.top()));
+        stack_.pop();
+        return res;
+    }
+
+    //正常值
+    void pop(T& value){
+        std::lock_guard<std::mutex> lk(mutex_);
+        //pop前检查是否为空
+        if(stack_.empty()){
+            throw EmptyStackException();
+        }
+        value = stack_.top();
+        stack_.pop();
+    }
+
+    bool empty() const{
+        std::lock_guard<std::mutex> lk(mutex_);
+        return stack_.empty();
+    }
+
+private:
+    std::stack<T> stack_;
+    mutable std::mutex mutex_;
+};
+```
+
+
+

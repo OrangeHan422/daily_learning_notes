@@ -903,3 +903,282 @@ int main() {
 }
 ```
 
+#### 命令模式
+
+命令模式可以抽象出三个主要组成：
+
++ 发起者：即命令的调用者
++ 命令：命令的抽象或者具体类，负责调用接受者，在该模式中主要负责模拟发起者发出的执行请求
++ 接受者：接收命令并执行，实际的执行者
+
+本质是通过中间类（命令类）将发起者和接受者进行解耦，这样在新增命令的时候可以通过新增命令子类，而不需要改动发起者和接受者，复合开闭原则.
+
+优点是：
+
++ 支持撤销
++ 队列请求，依次执行
++ 可扩展
+
+简单实现：
+
+```c++
+class Command{
+public:
+    virtual void exec() = 0;
+    virtual void undo() = 0;
+};
+
+class Receiver{
+public:
+    Receiver() = default;
+    void action(){
+        std::cout << "receiver action" << std::endl;
+    }
+
+    void undo(){
+        std::cout << "receiver undo" << std::endl;
+    }
+};
+
+
+class ConcreteCmd:public Command{
+public:
+    explicit ConcreteCmd(Receiver* recv)
+    :recv_(recv)
+    {}
+
+    void exec() override{
+        recv_->action();
+    }
+
+    void undo() override{
+        recv_->undo();
+    }
+private:    
+    Receiver* recv_;
+};
+
+
+
+//唤醒者可以维持一个队列，并且提供撤销操作
+class Invoker{
+public:
+    explicit Invoker()
+    {}
+
+    //设置命令并且执行,同时更新队列和撤销栈
+    void setAndExecCmd(Command* cmd){
+        cmd->exec();
+        cmd_que_.push_back(cmd);
+        cmd_stack_.push(cmd);
+    }
+
+    void undoLastCmd(){
+        if(!cmd_stack_.empty()){
+            Command* last_cmd = cmd_stack_.top();
+            cmd_stack_.pop();
+            last_cmd->undo();
+            cmd_que_.pop_back();
+        }else{
+            std::cout << "no cmd to undo" << std::endl;
+        }
+    }
+
+    void execCmdQueue(){
+        for(auto cmd:cmd_que_){
+            cmd->exec();
+        }
+    }
+private:
+    /// @brief 任务队列
+    std::deque<Command*> cmd_que_;
+    /// @brief 撤销栈
+    std::stack<Command*> cmd_stack_;
+};
+
+
+int main() {
+    Receiver* rc = new Receiver();
+    Command* cmd1 = new ConcreteCmd(rc);
+    Invoker* iv = new Invoker();
+    iv->setAndExecCmd(cmd1);
+    iv->setAndExecCmd(cmd1);
+    iv->undoLastCmd();
+    iv->execCmdQueue();
+}
+//输出
+receiver action
+receiver action
+receiver undo
+receiver action
+```
+
+#### 中介者模式
+
+中介者模式作用是可以将类之间的网状结构转化为星型结构，这样这些类之间就不需要相互引用，共同引用一个中介者就可以，降低系统的耦合性
+
+简单实现如下：
+
+```c++
+class Colleague;
+//抽象中介者
+class Mediator{
+public:
+    virtual void add(Colleague* colleague) = 0;
+    virtual void send(std::string_view msg,Colleague* c) = 0;
+};
+
+
+//抽象同事
+class Colleague{
+public:
+    explicit Colleague(Mediator* m)
+    :mediator_(m){}
+
+    virtual void send(std::string_view msg) = 0;
+    virtual void recv(std::string_view msg) = 0;
+protected:
+    Mediator* mediator_;
+};
+
+//具体中介
+class ConcreteM:public Mediator{
+public:
+    void add(Colleague* c) override{
+        list_.push_back(c);
+    }
+
+    void send(std::string_view msg,Colleague* c) override{
+        for(auto elem : list_){
+            if(elem != c){
+                elem->recv(msg);
+            }
+        }
+    }
+private:
+    std::vector<Colleague*> list_;
+};
+
+
+class ConcreteCA:public Colleague{
+public:
+    ConcreteCA(Mediator* m)
+    :Colleague(m){}
+
+    void send(std::string_view msg) override{
+        mediator_->send(msg,this);
+    }
+
+    void recv(std::string_view msg) override{
+        std::cout << "A recv:" << msg << std::endl;
+    }
+};
+
+class ConcreteCB:public Colleague{
+public:
+    ConcreteCB(Mediator* m)
+    :Colleague(m){}
+
+    void send(std::string_view msg) override{
+        mediator_->send(msg,this);
+    }
+
+    void recv(std::string_view msg) override{
+        std::cout << "B recv:" << msg << std::endl;
+    }
+};
+
+
+int main() {
+    Mediator* m = new ConcreteM();
+
+    Colleague* cA = new ConcreteCA(m);
+    Colleague* cB = new ConcreteCB(m);
+
+    m->add(cA);
+    m->add(cB);
+
+    cA->send("Hello from A");
+    cB->send("Hello from B");
+}
+```
+
+#### 备忘录模式
+
+概念：允许在不暴露对象内部实现的情况下捕获对象内部的状态，并且可以在对象外部记录，以便后续恢复状态
+
+基本结构：
+
++ 发起人：需要使用备忘录记录内部数据的对象。负责创建一个备忘录对象，记录自己部分或者全部的内部状态
++ 备忘录：存储发起人的内部状态，对外提供宽接口和窄接口，宽接口供发起者访问数据，窄结构供管理者管理（存储）备忘录
++ 管理者：负责存储备忘录对象，但是并不了解备忘录的内部结构，管理者可以存储多个备忘录对象
++ 客户端：在需要恢复状态的时候，客户端从管理者获取备忘录对象，并将其传递给发起人进行状态恢复。
+
+简单实现：
+
+```c++
+//备忘录类
+class Memento{
+public:
+    Memento(std::string_view state)
+    :state_(state)
+    {}
+    std::string state(){
+        return state_;
+    }
+private:
+    std::string state_;
+};
+//发起人，可以创建备忘录对象
+class Originator{
+public:
+    void setState(std::string_view state){
+        state_ = state;
+    }
+    std::string getState(){
+        return state_;
+    }
+    Memento* createMemnto(){
+        return new Memento(state_);
+    }
+    void restore(Memento* mem){
+        state_ = mem->state();
+    }
+private:
+    std::string state_;
+};
+
+//管理者
+class Caretaker{
+public:
+    void add(Memento* m){
+        mem_.push_back(m);
+    }
+    Memento* get(int i){
+        return mem_.at(i);
+    }
+private:
+    std::vector<Memento*> mem_;
+};
+
+int main() {
+    //发起者
+    Originator* o = new Originator();
+    o->setState("state 1");
+    //管理者
+    Caretaker* c = new Caretaker();
+    //发起者创建备忘录并让管理者存储
+    c->add(o->createMemnto());
+    //发起者更改自己的状态
+    o->setState("state 2");
+    //再次保存发起者的状态
+    c->add(o->createMemnto());
+    //发起者恢复状态1
+    o->restore(c->get(0));
+    std::cout << "current state:" << o->getState() << std::endl;
+}
+```
+
+#### 模板方法模式
+
+该方法定义一个算法的骨架，将具体的实现**延迟**到子类。模版方法模式是的子类可以在不改变算法结构的情况下，重新定义算法中的某些步骤。
