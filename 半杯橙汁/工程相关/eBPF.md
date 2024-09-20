@@ -30,5 +30,121 @@ BPF由指令集、存储对象和辅助函数等几部分组成。由于它采�
 
 > 总的来说，可观测性是跟踪采样的总体抽象
 
+### 1.3 BCC、bpftrace和IO Visor
 
+为了方便BPF程序的编写，在跟踪方面两个主流的前端：BCC和bpftrace
+
+BCC（BPF编译器集合，BPF Compiler Collection）是最早用于开发BPF跟踪程序的高级框架。它提供了一个编写内核BPF程序的C语言环境，也为诸如Python、Lua和C++提供接口。也是libbcc和libbpf库的前身。这两个库提供了使用BPF程序对事件进行观测的库函数。BCC则是提供了70多个BPF工具。
+
+bpftrace是一个新出现的前端，专门用于创建BPF工具的高级语言支持。bpftrace也是基于libbcc和libbpf库进行构建的
+
+BCC和bpftrace的关系如图，bpftrace在编写功能强大的单行程序或者短小的脚步方面较强；BCC更适合开发复杂的脚本和作为后台进程使用，还可以调用其他的库支持(类比VS和vscode)：
+
+![image-20240920144945199](./images/image-20240920144945199.png)
+
+嵌入式方面有一个ply的BPF前端，较为轻量化且依赖最小化。部分bpftrace工具在转为ply语法后就可以使用ply执行，但是ply尚不成熟。
+
+BCC和bpftrace都不在内核代码仓库中，均属于GitHub中名为IO Visor的Linux基金会项目
+
++ [ply](https://github.com/iovisor/ply)
++ [bpftrace](https://github.com/bpftrace/bpftrace)
++ [BCC](https://github.com/iovisor/bcc)
+
+### 1.5 BPF跟踪的能见度
+
+无需重启，当我们需要对内核组件、设备、应用库进行检查时，可以立即使用BPF工具对其现场直播
+
+### 1.6 动态插桩：kprobes和uprobes
+
+动态插桩技术：在生产环境对于正在运行的软件插入观测点的能力。在未启用时，软件不受任何影响，动态插桩开销为零。其中kprobes值得是内核函数插桩，uprobes是用户态函数插桩，在bpftrace中使用的动态插桩示例如下：
+
+![image-20240920153840880](./images/image-20240920153840880.png)
+
+### 1.7 静态插桩：tracepoint和USDT
+
+>  tracepoint又称为内核跟踪点。
+
+动态插桩技术有一大缺点：随着软件变更，被插桩的函数可能被重新命名，或者被移除。当内核或者应用软件升级后，BPF工具可能无法正常工作。这属于接口稳定性问题。并且在使用了编译器优化后，部分函数会被转换为内联函数(inline)函数，对于这些函数，就无法使用kprobes或者uprobes。
+
+对于上述的问题，统一的解决方法是改用静态插桩技术。静态插桩会将稳定的事件名字编码到软件代码职工，由开发者进行维护。BPF工具支持内核的静态跟踪点插桩技术，也支持用户态的静态定义跟踪插桩技术USDT(user level statically defined tracing)。静态插桩技术的缺点显而易见，增加了开发者的维护成本，因此即使软件中存在静态插桩点，数量也十分有限。
+
+上述缺点除非自己开发BPF工具，否则无需关注。如有需要，推荐先使用静态跟踪(跟踪点或者USDT)，不够用的话再使用动态插桩技术(kprobes或uprobes)。bpftrace中使用静态插桩技术的例子：
+
+![image-20240920160047436](./images/image-20240920160047436.png)
+
+### 1.8 初识bpftrace：跟踪open()
+
+> 需要注意的是，当使用系统调用的跟踪点的时候，需要再内核编译的时候，打开`CONFIG_FTRACE_SYSCALLS`选项
+
+使用bpftrace跟踪系统调用open(2)，可以使用一个现有的静态插桩点(syscall:sys_enter_open)，使用bpftrace可以写一个单行程序，在调用open的时候输出进程的名字和传递给open系统调用的文件名：
+
+![image-20240920160848613](./images/image-20240920160848613.png)
+
+其中bpftrace程序被定义在单引号内，编写后enter会立即编译执行，ctrl+c会结束同时移除BPF程序。也体现了BPF跟踪工具提供的按需插桩的工作方式：只在相关命令存活期间被激活。
+
+open系统调用有很多的变体，可以通过命令选项`-l`使用统配符进行跟踪列出所有和open相关的跟踪点
+
+![image-20240920161351459](./images/image-20240920161351459.png)
+
+实际上，openat这个变体使用的频率可能更高，可以使用bpftrace来验证一下：
+
+![image-20240920161511400](./images/image-20240920161511400.png)
+
+上述的计算信息都是在内核态下高效计算出来的，当bpftrace定义的程序过长的时候，可以将其制作为一个脚本进行执行。
+
+bpftrace提供了一个跟踪所有系统调用开始和结束位置的程序opensnoop.bt
+
+![image-20240920162122721](./images/image-20240920162122721.png)
+
+### 1.9 再回到BCC：追踪open()
+
+BCC版本的opensnoop
+
+![image-20240920162336293](./images/image-20240920162336293.png)
+
+BCC提供的工具一般会提供更加复杂的功能：
+
+![image-20240920162522759](./images/image-20240920162522759.png)
+
+这也就体现了BCC和bpftrace的差异：BCC自带工具很多，可以直接上手使用；而bpftrace则语法简单，更适合定制化开发
+
+## 第二章 技术背景
+
+### 2.1 图释BPF
+
+![image-20240920173010953](./images/image-20240920173010953.png)
+
+### 2.2 BPF
+
+BPF的工作方式：最终用户通过BPF虚拟机的指令集（也称为BPF字节码）定义过滤器表达式，然后传递给内核，有**解释器**执行。因此包过滤式在内核中直接执行的，避免了向用户态进程复制每个数据包。同时，BPF还提供了安全保障，用户自定义的过滤器首先需要通过安全性验证。tcpdump就使用了BPF过滤，其简要流程如下：
+
+![image-20240920173645165](./images/image-20240920173645165.png)
+
+使用tcpdump -d 参数可以打印出过滤器表达式的BPF指令：
+
+![image-20240920173749734](./images/image-20240920173749734.png)
+
+### 2.3 eBPF
+
+Linux运行时各模块的架构如下图，该图展示了BPF指令如何通过BPF验证器验证，再有BPF虚拟机执行。BPF虚拟机包括一个解释器以及一个JIT(及时 just in time)编译器:JIT负责生成处理器可直接执行的机器指令。验证器则拒绝不安全的指令。![image-20240920174523589](./images/image-20240920174523589.png)
+
+BPF可以通过辅助函数获取内核状态，利用BPF映射表进行存储。BPF程序在特定时间发生时执行，包括动态插桩（kprobes,uprobes）以及静态插桩(跟踪点)
+
+#### 2.3.1 为什么性能工具需要BPF
+
+BPF的与众不同之处在于，同时具备了高效率和生产环境安全性的特点，并且已经内置在了Linux内核中，有了BPF就可以直接使用BPF工具，无需新增内核组件。
+
+#### 2.3.3 编写BPF程序
+
+进行BPF编程的前端工具，从低级到高级排列如下：
+
++ LLVM：可以使用C语言或者LLVM中间表示形式(Intermediate Representation)进行编写，然后再编译为BPF，LLVM自带优化器，可以对它生成的BPF指令进行效率和体积上的优化
++ BCC：允许使用C语言编写BPF程序。内部实现仍然是使用LLVM中间表示形式和一个LLVM库来实现BPF编译
++ bpftrace：提供自己的高级语言。内部实现仍然是使用LLVM中间表示形式和一个LLVM库来实现BPF编译
+
+虽然很少使用到直接通过BPF指令集进行编程的情况，但是在使用工具遇到问题的时候，会有查看指令的需求。接下来两个小节通过bpftool以及bpftrace进行示例
+
+#### 2.3.4 使用BPF查看指令集：bpftool
+
+Linux4.15添加了bpftool这个工具，可以用来查看和操作BPF对象，包括BPF程序和对应的映射表。源码位于Linux源码的tools/bpf/bpftool中
 
