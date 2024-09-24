@@ -1181,4 +1181,134 @@ int main() {
 
 #### 模板方法模式
 
-该方法定义一个算法的骨架，将具体的实现**延迟**到子类。模版方法模式是的子类可以在不改变算法结构的情况下，重新定义算法中的某些步骤。
+该方法定义一个算法的骨架，将具体的实现**延迟**到子类。模版方法模式是的子类可以在不改变算法结构的情况下，重新定义算法中的某些步骤。(个人理解为架构模式，将算法的实现骨架抽象出来作为一个抽象基类，具体的步骤则是在子类中实现)：
+
+![image-20240924181429044](./images/image-20240924181429044.png)
+
+简易实现：
+
+```c++
+class Abstract{
+public:
+    void func(){
+        step1();
+        step2();
+        step3();
+    }
+
+protected:
+    virtual void step1() = 0;
+    virtual void step2() = 0;
+    virtual void step3() = 0;
+};
+
+class Concrete:public Abstract{
+private:
+    void step1() override{
+        std::cout << "step1" << std::endl;
+    }
+
+    void step2() override{
+        std::cout << "step2" << std::endl;
+    }
+
+    void step3() override{
+        std::cout << "step3" << std::endl;
+    }
+};
+
+int main() {
+    Abstract* base = new Concrete();
+    base->func();
+}
+```
+
+优点：提高了代码的复用性	适用场景：当功能/算法的整体框架固定，但是具体的步骤有差别的时候可以使用模板模式
+
+#### 迭代器模式
+
+主要作用是通过一个**统一的方式**访问一个聚合类型的对象，同时不暴露对象的内部表示。意如其名，C++的迭代器就是很好的示例。
+
+迭代器的基本结构角色：
+
++ 迭代器接口：定义统一行为的函数声明(operator->  operator*)
++ 迭代器实现：根据实际情况实现统一行为
++ 抽象聚合类：一般定义创建迭代器的函数声明( `begin()`  `end()`)
++ 具体聚合类：根据实际情况返回一个与自己类型对应的迭代器
+
+简易实现(指针满天飞)：
+
+```c++
+class Iterator{
+public:
+    virtual bool hasNext() = 0;
+    virtual void* next() = 0;
+
+    virtual ~Iterator() = default;
+};
+
+class ConcreteIterator:public Iterator{
+public:
+    ConcreteIterator(std::vector<void *>& elem)
+    :elements_(elem)
+    ,index_(0)
+    {}
+
+
+    bool hasNext() override{
+        return index_ < elements_.size();
+    }
+
+    void* next() override{
+        if(hasNext()){
+            return elements_[index_++];
+        }
+        return nullptr;
+    }
+
+private:
+    std::vector<void *> elements_;
+    int index_;
+};
+
+class Abstract{
+public:
+    virtual Iterator* iter() = 0;
+    virtual ~Abstract() = default;
+};
+
+class Concrete:public Abstract{
+public:
+    Concrete(std::vector<void *>& elem)
+    :elements_(elem)
+    {}
+
+    Iterator* iter() override{
+        return new ConcreteIterator(elements_);
+    }
+private:
+    std::vector<void *> elements_;
+};
+
+int main() {
+    std::vector<void *> elem;
+    std::string str1{"test1"};
+    std::string str2{"test2"};
+    std::string str3{"test3"};
+    elem.push_back(reinterpret_cast<void *>(&str1));
+    elem.push_back(reinterpret_cast<void *>(&str2));
+    elem.push_back(reinterpret_cast<void *>(&str3));
+    
+    Abstract* dood = new Concrete(elem);
+    Iterator* iter = dood->iter();
+
+    while(iter->hasNext()){
+        std::cout << *(reinterpret_cast<std::string*>(iter->next())) << std::endl;
+    }
+}
+```
+
+迭代器模式统一了行为，普通用户几乎不会使用，如果想要最大化的发挥该模式的优势，需要有夯实的多态以及模板编程能力。
+
+#### 状态模式
+
