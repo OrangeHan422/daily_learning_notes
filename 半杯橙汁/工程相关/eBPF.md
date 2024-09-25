@@ -148,3 +148,35 @@ BPF的与众不同之处在于，同时具备了高效率和生产环境安全�
 
 Linux4.15添加了bpftool这个工具，可以用来查看和操作BPF对象，包括BPF程序和对应的映射表。源码位于Linux源码的tools/bpf/bpftool中
 
+bpftools的默认输出展示了所操作的BPF对象：
+
+![image-20240925085939087](./images/image-20240925085939087.png)
+
+对于每一个对象，都有一个专门的帮助文档：
+
+![image-20240925090049265](./images/image-20240925090049265.png)
+
+bpftools perf显示了哪些BPF程序正在通过perf_event_open()进行挂载：
+
+![image-20240925090246767](./images/image-20240925090246767.png)
+
+![image-20240925090552353](./images/image-20240925090552353.png)![image-20240925090558677](./images/image-20240925090558677.png)
+
+以上输出有3个不同的PID，分属不同的BPF程序
+
++ PID 1765 是Vecotr BPF PMDA大理，用来做实例性能分析(细节见17章)
++ PID 21993 是bpftrace版本的biolatency。它显示使用两个uprobes（用户态插桩）,即bpftrace中的BEGIN和END探针，还有两个kprobes(内核态插桩)用于对块IO的起始结束进行插桩（第9章有该程序的源码）
++ PID 25440 是BCC版本的biolatency，它正在对另一个块IO的起始函数进行插桩
+
+offset字段显示了被插桩对象的偏移量。对于bpftrace，偏移量1781920匹配了bpftrace二进制文件中的BEGIN_trigger函数，偏移量1781927匹配了END_trigger函数(可以使用readelf -s bpftrace来进行验证)
+
+prog_id是BPF程序ID，可以使用该命令进行打印：
+
+```shell
+bpftool prog show 
+```
+
+![image-20240925091428245](./images/image-20240925091428245.png)
+
+输出以程序ID开始（262 263），示例中是BCC的kprobe程序，该程序中带有BTF(BPF Type Format)信息，这可以从上面的输出显示的btf_id看出来。此时仅需要知道BTF是BPF版本的调试信息就可以了。
+
