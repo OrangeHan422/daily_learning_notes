@@ -156,7 +156,7 @@ bpftools的默认输出展示了所操作的BPF对象：
 
 ![image-20240925090049265](./images/image-20240925090049265.png)
 
-bpftools perf显示了哪些BPF程序正在通过perf_event_open()进行挂载：
+**bpftools perf**显示了哪些BPF程序正在通过perf_event_open()进行挂载：
 
 ![image-20240925090246767](./images/image-20240925090246767.png)
 
@@ -179,4 +179,54 @@ bpftool prog show
 ![image-20240925091428245](./images/image-20240925091428245.png)
 
 输出以程序ID开始（262 263），示例中是BCC的kprobe程序，该程序中带有BTF(BPF Type Format)信息，这可以从上面的输出显示的btf_id看出来。此时仅需要知道BTF是BPF版本的调试信息就可以了。
+
+bpftool prog dump xlated
+
+每个BPF程序都可以通过它的ID被打印出来。xlated模式将BPF指令翻译为汇编指令打印出来。示例中为程序234、bpftrace块IO完成跟踪程序的输出：
+
+![image-20240926085137293](./images/image-20240926085137293.png)![image-20240926085143213](./images/image-20240926085143213.png)
+
+上述输出显示了可被BPF调用的受限的内核辅助函数之一：bpf_probe_read()
+
+以下为比较上述输出（非黑体汇编）和观测块IO完成事件的程序（黑体）输出，该程序基于BTF编译，ID是263：
+
+![image-20240926085522511](./images/image-20240926085522511.png)
+
+如果程序中包含了BTF信息，那么可以使用linum修饰符在输出中增加源代码文件和行信息（使用黑体标记）
+
+![image-20240926085728804](./images/image-20240926085728804.png)
+
+使用opcodes可以输出包含BPF指令的opcode(黑体表示，操作码)：
+
+![image-20240926090017965](./images/image-20240926090017965.png)
+
+修饰符visual,可以以DOT格式输出控制流信息，支持使用外部可视化软件打开。以下例子使用的是GraphVix软件和其绘制有向图工具dot(1):
+
+![image-20240926090219035](./images/image-20240926090219035.png)
+
+以下为使用GraphVix中的osage对BPF程序可视化执行的结果：
+
+![image-20240926090400653](./images/image-20240926090400653.png)
+
+bpftool prog dump jited
+
+prog dump jited子命令显示了经过JIT编译之后的机器码。示例为x86_64体系结构下BCC的块IO完成跟踪程序：
+
+![image-20240926090641470](./images/image-20240926090641470.png)![image-20240926090649981](./images/image-20240926090649981.png)
+
+bpftool btf
+
+bpftool可以打印BTF的ID，如BTF ID 5 是BCC的块IO的完成事件的输出：
+
+![image-20240926091136016](./images/image-20240926091136016.png)![image-20240926091143860](./images/image-20240926091143860.png)
+
+#### 2.3.5 使用bpftrace查看BPF指令集
+
+tcpdump 的-d参数可以输出BPF指令，bpftrace也可以通过-v/-d参数达到该效果：
+
+![image-20240926091516099](./images/image-20240926091516099.png)
+
+大多数人不是设计到BPF指令层次的修改或者错误排查，这些事情应该交给社区来管理，大咖也可以直接向社区提供补丁
+
+#### 2.3.6 BPF API
 
