@@ -465,3 +465,151 @@ kprobe已经做了十分安全的防范措施。实际使用中最大的风险�
 kprobes在某些ARM 64位系统上不能正常工作，因为这些平台上的内核代码区不允许被修改。
 
 #### 2.7.2 kprobes接口
+
+最初使用kprobes技术时，需要先写一个内核模块，通常用C书写入口处理函数和返回函数，再通过调用register_kprobe()注册。接下来加载该内核模块，使用printk()输出定制化信息。计数后，在调用unregister_kproce()作为结束。
+
+现在有以下三种接口可访问kprobes：
+
++ kprobe API:如register_kprobe()等
++ 基于Ftrace的，通过/sys/kernel/debug/tracing/kprobe_events:通过向这个文件写入字符创，可以配置开启和停止kprobes
++ perf_event_open():与perf(1)工具所使用的一样，进来BPF耿总工具也开始使用这些函数。Linux内核4.17中接入了相关支持
+
+最主要的使用方法还是借助前端追踪器，包括perf(1)、SystemTap以及BPF追踪器，如BCC和bpftrace
+
+#### 2.7.3 BPF和kprobes
+
+kprobes向BCC的bpftrace提供了内核动态插桩的机制，在很多工具中都用到了该机制。相关接口如下：
+
++ BCC:attach_kprobe()和attach_kretprobe()，支持对函数的开始或某一偏移量位置进行插桩。kretprobes都是在函数返回处进行动态插桩
++ bpftrace:kprobe和kretprobe探针类型，只支持在函数入口位置插桩。kretprobes都是在函数返回处进行动态插桩
+
+简单的BCC例子：vfsstat(8)工具对VFS接口中的一些关键调用进行了插桩，每秒打印的概要信息：
+
+![image-20241009142812645](./images/image-20241009142812645.png)
+
+可以在vfsstat源代码中查看kprobe跟踪了那些函数：
+
+![image-20241009143651870](./images/image-20241009143651870.png)
+
+另一个bpftrace的例子，该单行程序通过匹配"vfs_"开头的函数，统计所有VFS函数的调用次数：
+
+![image-20241009143837344](./images/image-20241009143837344.png)
+
+#### 2.7.4 关于kprobes的更多内容
+
+参考：
+
+![image-20241009143946528](./images/image-20241009143946528.png)
+
+### 2.8 uprobes
+
+uprobes提供了用户态程序的动态插桩。其utrace接口和kprobes接口十分相似。uprobes在Linux内核3.5以上进行支持
+
+uprobes与kprobes类似，只是在用户态程序使用。uprobes可以在用户态程序的函数入口、特定偏移处以及函数返回处进行插桩
+
+uprobes也是基于文件的，当一个可执行文件中的一个函数被追踪时，所有使用到这个文件的进程都会被插桩，包括那些尚未启动的进程。这样就可以全系统范围内跟踪系统库调用。
+
+#### 2.8.1 uprobes是如何工作的
+
+与kprobes类似：将一个快速断点指令插入目标指令处，该指令将执行转交给uprobes处理函数。当不再需要uprobes时，目标指令会恢复成原来的样子。对于uretprobes，也是在函数入口处使用uprobe进行插桩，而在函数返回之前，则使用一个蹦床函数对返回地址进行劫持，和kprobes类似。
+
+可以通过调试器看到该行为。比如从bash(1)中反汇编readline()函数：
+
+![image-20241009145404453](./images/image-20241009145404453.png)
+
+而使用了uprobes(或者uretprobes)进行插桩：
+
+![image-20241009145442005](./images/image-20241009145442005.png)
+
+注意，第一个指令已经被替换成int3单步中断。
+
+可以使用一个bpftrace单行程序来对readline()进行插桩：
+
+```shell
+bpftrace -e 'uprobe:/bin/bash:readline { @ = count() }'
+```
+
+该程序对当前正在运行以及后续会运行的bash shell的readline()进行跟踪。打印出统计计数，使用`Ctrl+C`退出。当bpftrace停止运行时，uprobe会被移除，原始的指令被恢复回去。
+
+#### 2.8.2 uprobes接口
+
++ 基于Ftrace的，通过向`/sys/kernel/debug/tracing/uprobe_events`配置文件中写入特定字符串打开或关闭uprobes
++ perf_event_open():和perf(1)工具的用法一样。相关支持已经加入内核4.17版本。
+
+在内核中同时包含了register_uprobe_event()函数，和register_kprobe()类似，但是没有以API形式显露
+
+#### 2.8.3 BPF与uprobes
+
+uprobes为BCC和bpftrace提供了用户态程序的动态插桩支持，这在多个工具中都有使用。接口如下：
+
++ BCC:attach_uprobe()和attch_uretprobe()
++ bpftrace:uprobe和uretprobe探针类型
+
+同kprobe一样，BCC支持在函数入口，指定偏移量处，函数返回处进行插桩。而bpftrace仅支持入口和返回处进行插桩、
+
+举个BCC中的例子:gethostlatency(8)工具利用对库函数getaddrinfo(3)和gethostbyname(3)的插桩对主机名解析(DNS)访问进行跟踪
+
+![image-20241009163617240](./images/image-20241009163617240.png)
+
+被跟踪的函数可以通过源代码看到：
+
+![image-20241009163646486](./images/image-20241009163646486.png)
+
+bpftrace的例子，该单行程序列出并统计了libc系统库中gethost函数的调用次数：
+
+```shell
+bpftrace -l 'uprobe:/lib/x86_64-linux-gnu/libc.so.6:gethost*'
+```
+
+![image-20241009163912034](./images/image-20241009163912034.png)
+
+```shell
+bpftrace -e 'uprobe:/lib/x86_64-linux-gnu/libc.so.6:gethost* { @[probe] = count(); }'
+```
+
+![image-20241009164001463](./images/image-20241009164001463.png)
+
+#### 2.8.4 uprobes的开销和未来的工作
+
+uprobes可能会被挂载到高频事件上，比如malloc()和free()。此时可能会导致应用程序10倍以上的性能损耗。所以只能应用于测试环境中的故障排查过程。
+
+目前正在讨论使用共享库来替换目前的、需要往返内核的uprobes实现，这样可以使BPF跟踪完全在用户态内进行。该技术已经被LTTng-UST使用了几年了，性能比当前实现相比快10-100倍
+
+#### 2.8.5 扩展阅读
+
+![image-20241009164357299](./images/image-20241009164357299.png)
+
+### 2.9 跟踪点(tracepoints)
+
+跟踪点可以用来对内核进行静态插桩。内核开发正在内核函数特定逻辑位置处，有意放置了这些插桩点；这些跟踪点会被编译到内核的二进制文件中。在Linux内核2.6.32开始支持。kprobes和跟踪点比较：
+
+![image-20241009164833795](./images/image-20241009164833795.png)
+
+对于内核开发者来说，跟踪点无疑增加了维护成本，并且其适用范围比kprobes要小很多。其有点是它的API比较稳定：即使内核升级了，大部分跟踪点依旧可以使用。但是kprobes的工具在内核版本升级时，如果被跟踪函数被重命名或者功能改变，则会导致不可用。
+
+所以如果条件允许，应当先尝试使用跟踪点，再使用kprobes
+
+跟踪点的格式为"子系统:事件名"(subsystem:eventname,如kmem:kmalloc)
+
+格式的前半部分，不同跟踪工具有不同叫法：系统、子系统、类、提供商等。
+
+#### 2.9.1 如何添加跟踪点
+
+可以查看sched子系统中`sched:sched_process_exec`是如何被加入内核的
+
+在内核源代码目录树`include/trace/events`下有跟踪点相关的头文件，以下是`sched.h`部分截取内容：![image-20241009172753725](./images/image-20241009172753725.png)
+
+上述代码的信息也会在运行时通过/sys目录下的Ftrace框架显露出来，对于每一个跟踪点会有一个对应的格式文件，如：
+
+```shell
+cat /sys/kernel/debug/tracing/events/sched/sched_process_exec/format
+```
+
+![image-20241009173205809](./images/image-20241009173205809.png)
+
+各种跟踪器使用此格式文件来裂解跟踪点上绑定的元数据信息。下面的例子是在内核源代码`fs/exec.c`中通过`trace_sched_process_exec()`调用的
+
+![image-20241009173525453](./images/image-20241009173525453.png)
+
+#### 2.9.2 跟踪点的工作原理
+
