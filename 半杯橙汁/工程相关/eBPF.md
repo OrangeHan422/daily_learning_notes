@@ -613,3 +613,122 @@ cat /sys/kernel/debug/tracing/events/sched/sched_process_exec/format
 
 #### 2.9.2 跟踪点的工作原理
 
+跟踪点处于不启动的状态时，性能开销要尽可能的小。Mathieu Desnoyers使用了一项叫做“静态跳转补丁”(static jump patching)的技术。该技术依赖一个编译选项，如下：
+
++ 在内核编译阶段会在跟踪点位置插入一条不做任何命令的指令。在x86_64架构上，这是一个5字节的nop指令。这个长度的选择是为了确保以后可以将其替换为一个5字节的jump指令
+
++ 在函数尾部插入一个跟踪点处理函数，也叫做蹦床函数（之所以叫这个名字，是因为在执行过程中函数会跳入，然后再跳出这个处理函数）。这个函数会便利一个存储跟踪点探针回调函数的数组。这样做会导致函数编译结果稍稍变大，有可能对指令缓存有一些小影响。
+
++ 在执行过程中，当某个跟踪器启用跟踪点时（该跟踪点可能已经被其他跟踪器所启用）：
+
+  > + 在跟踪点回调函数数组中插入一条新的跟踪器回调函数，以RCU（Read-copy update，允许在更新的同时读取数据）形式进行同步更新
+  > + 如果之前跟踪点处于禁用状态，nop指令的地址会重写为跳转到蹦床函数的指令
+
++ 当跟踪器禁用某个跟踪点时：
+
+  > + 在跟踪点回调函数数组中删除该跟踪器的回调函数，并以RCU形式进行同步更新
+  > + 如果最后一个回调函数也被去除了，那么jmp指令再重写为nop指令。
+
+这样可以最小化处于禁用状态的跟踪点的性能开销，几乎可以忽略不计。
+
+如果asm goto指令不可用，那么将不再用jmp来替换nop，改为使用一个从内存中读取一个变量的状态分支。
+
+#### 2.9.3 跟踪点的接口
+
+跟踪点有以下两个接口：
+
++ 基于Ftrace的接口，通过`/sys/kernel/debug/tracing/events`：每个跟踪点的系统有一个子目录，每个跟踪点则对应目录下的一个文件（通过向这些文件中写入内容开启或关闭跟踪点）
++ perf_event_open():这是perf(1)工具一直以来用的接口，进来BPF追踪也开始使用。（通过perf_tracepoint PMU）
+
+#### 2.9.4 跟踪点和BPF
+
+跟踪点为BCC和bpftrace提供了内核的静态插桩支持。接口如下：
+
++ BCC:TRACEPOINT_PROBE()
++ bpftrace:跟踪点探针类型
+
+Linux在4.7后BPF才支持跟踪点，所以工具相对较少
+
+BCC中使用跟踪点的一个例子是tcplife(8).该工具为每个TCP会话打印一行摘要信息(第10章详细叙述)：
+
+![image-20241011153946577](./images/image-20241011153946577.png)
+
+作为bpftrace使用跟踪点的例子，下面单行程序会对之前的sched:sched_process_exec进行插桩：
+
+![image-20241011154902446](./images/image-20241011154902446.png)
+
+#### 2.9.5 BPF原始追踪点
+
+Alexei Starovoitov开发了一个新的跟踪点接口：BPF_RAW_TRACEPOINT,在2018加入Linux4.17。它向跟踪点显露原始参数，这样可以避免因为需要创建稳定的跟踪点参数而导致的开销，因为这些参数可能压根没必要。这有点像以kprobes方式使用跟踪点：最终得到了一个不稳定的API，但是可以访问更多字段，也不需要承担跟踪点的性能损失。该方式相比kprobes更加稳定，因为跟踪点探针的名字是稳定的，不稳定的是参数。
+
+Alexei的压测结果证明了BPF_RAW_TRACEPOINT性能好于kprobes和标准跟踪点：
+
+![image-20241011155452816](./images/image-20241011155452816.png)
+
+#### 2.9.6 扩展阅读
+
+![image-20241011155524398](./images/image-20241011155524398.png)
+
+### 2.10 USDT
+
+用户态预定义静态跟踪(user-level statically defined tracing,USDT)提供了一个用户空间版的跟踪点机制。
+
+USDT和用户态软件的日志或者跟踪相关技术的不同在于，它依赖于外部的系统跟踪器来唤起。如果没有外部跟踪器，应用中的USDT不会做任何事，也不会开启。
+
+许多应用默认不开启USDT，显示开启需要使用配置参数--enable-dtrace-probes或者--with-dtrace
+
+#### 2.10.1 添加USDT探针
+
+有两种方式给应用程序添加USDT探针：通过systemtap-sdt-dev包提供的头文件和工具，或者使用自定义的头文件。这些探针定义了可以被放置在代码中各个逻辑位置上的宏，以此生成USDT的探针。BCC项目中的examples/usdt_sample目录下包含了USDT示例。这个例子可以用systemtap-sdt-dev头文件，或者使用Facebook的FollyC++库。
+
+**Folly**
+
+使用Folly添加USDT探针的过程如下
+
++ 在目标代码中增加头文件：
+
+  ```c++
+  #include "folly/tracing/StaticTracepoint.h"
+  ```
+
++ 在目标位置增加USDT探针，采用如下格式：
+
+  ```c++
+  FOLLY_SDT(provider,name,arg1,arg2,...)
+  ```
+
+  "provider"对探针进行分类，"name"是探针的名字，后面是可选的参数。在BCC的USDT代码中包含了：
+
+  ```c++
+  FOLLY_SDT(usdt_sample_lib1,operation_start,operationId,request_input().c_str());
+  ```
+
+  这定义了一个usdt_sample_lib1:operation_start探针，带有两个参数。USDT例子中包含了operation_end探针。
+
++ 编译软件。可以使用readelf(1)工具来确认USDT探针是否存在：
+
+  ![image-20241012091259569](./images/image-20241012091259569.png)
+
+  readelf(1)的命令行参数-n打印了notes文件段（即文件注释信息，版本、构建时间、二进制程序接口等），这里显示了编译进去的USDT探针的信息。
+
++ 可选步骤：有时准备添加的参数，在探针的位置处没有现成的，必须使用耗费CPU的函数调用来构建。为了在这些探针未被使用时避免调用，可以在函数外面增加一个探针信号量：
+
+  ```c++
+  FOLLY_SDT_DEFINE_SEMAPHORE(provider,name)
+  ```
+
+  此时探针就变成了：
+
+  ```c++
+  if(FOLLY_SDT_IS_ENABLED(provider,name)){
+      ...expensive argument processing...
+      FOLLY_SDT_WITH_SEMAPHORE(provider,name,arg1,arg2,...);
+  }
+  ```
+
+  这样昂贵的参数处理，只会在探针启用（激活）后才会发生。这个信号量地址可以通过readelf(1)查看，跟踪工具可以在探针启用的时候对它进行设定。
+
+  注意：当信号量所保护的探针在使用时，这些跟踪工具通常需要指定一个PID，这样才可以设定该PID的信号量。
+
+#### 2.10.2 USDT是如何工作的
+
