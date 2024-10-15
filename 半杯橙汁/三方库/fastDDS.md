@@ -1123,3 +1123,135 @@ cmake .. && cmake --build .
 Fast DDS（前称Fast RTPS）是一个高效高性能的DDS规范的实现，一个为分布式软件设计的DCPS中间件。本节内容回顾Fast DDS的架构，操作和主要特性。
 
 ### 2.1 架构
+
+fast DDS的层级结构模型如下图：
+
++ 应用层(Application layer):使用Fast DDS API实现分布式系统通信的用户应用。
++ Fast DDS layer:DDS通信中间件的强大实现。允许部署多个域，并且在相同域中的域成员可以通过话题进行发布/订阅
++ RTPS layer：支持与DDS应用的[实时发布-订阅协议](https://www.omg.org/spec/DDSI-RTPS/2.2)(RTPS)的实现。该层实现了传输层的抽象。
++ 传输层(Transport Layer):Fast DDS可以使用不同的传输协议，如UDP、TCP、SHM(共享内存)
+
+![image-20241012180649444](./images/image-20241012180649444.png)
+
+#### 2.1.1 DDS层
+
+FastDDS的DDS层定义了几个关键元素用来通信。用户需要在自己的应用程序中创建这些元素来与DDS进行交互以及创建以数据为中心的系统。Fast DDS根据DDS规范定义了这些通信元素，并称其为*实体*(Entities)。任何支持服务质量（QoS）以及监听者（Listener）的对象都是一个DDS实体。
+
++ QoS：每个实体的行为所依据的机制
++ Listener：实体在应用执行期间被通知某些事件已经发生的机制（其实就是回调函数的封装类）
+
+下面列出了DDS实体及其描述和功能。对于每个实体的详细信息、QoS、以及listener会在第三章介绍。
+
++ 域(Domain)：一个标识唯一DDS domain的正整形值。每个域成员(DomainParticipant)都会被分配一个域(Domain)，这样相同域之间的成员可以互相沟通，不同域之间的成员则互相隔绝。
++ 域成员(DomainParticipant):包括诸如发布者、订阅者、话题以及多播话题等实体的对象。被包含的实体的创建以及行为的配置都需要通过该实体。
++ 发布者(Publisher)：发布者通过一个DataWriter在一个话题下发布数据。该实体可以有一个或者多个DataWriter实体，并负责创建以及配置他(们)
++ DataWriter:负责发布数据的实体。用户在创建该实体的时候必须指定数据发布在哪个话题中。将数据对象作为change写入缓存(DataWriterHistory)中就标志着一次发布结束。
++ DataWriterHistory:数据对象的一系列变换(changes).当DataWriter在指定话题发送数据的时候，实际上就是在这个数据中写入一个change。History中注册的其实是change。这些changes接下来被发送给订阅了指定话题的DataReader
++ 订阅者(Subscriber)：订阅者通过一个DataReader在一个话题下接收数据。该实体可以有一个或者多个DataReader实体，并负责创建以及配置他(们)
++ DataReader:订阅话题并接收发布的实体。用户创建该实体的时候必须指定需要订阅的话题。DataReader将消息作为changes存储在DataReaderHistory中
++ DataReaderHistory:DataReader订阅了指定话题后接收的数据对象都作为changes存储在这里
++ 话题(Topic)：绑定发布者DataWriter以及订阅者DataReader的实体。
+
+#### 2.1.2 RTPS层
+
+就像上面提及的一样，Fast DDS中的RTPS协议是将DDS应用实体从传输层抽象出来。在上面的图中，RTPS图有四个主要的实体(Entities)
+
++ RTPS域(RTPSDomain):DDS 域(domain)的RTPS协议扩展
++ RTPS成员(RTPSParticipant)：包含其他RTPS实体的实体。负责创建其包含的实体以及他们的配置
++ RTPSWriter:消息源。负责从DataWriterHistory中读取changes，并转发给所有之前配对的RTPSReader
++ RTPSReader：接收信息的实体。将从RTPSWriter中读取的changes写入DataReaderHistory
+
+这些实体的详细解释、属性以及监听这，将会在第四章介绍
+
+#### 2.1.3 传输层
+
+Fast DDS支持多种协议。分别是UDPv4，UDPv6，TCPv4，TCPv6以及共享内存(SHM,Shared Memory)。默认的域成员使用UDPv4以及共享内存。所有配置以及支持的传输协议在第六章介绍。
+
+### 2.2 编程和执行模型
+
+Fast DDS是一个并发的事件驱动模型。下面将介绍Fast DDS中管理操作的多线程模型以及可能的事件。
+
+#### 2.2.1 并发以及多线程
+
+Fast DDS实现了一个并发的多线程模型。每个域成员(DomainParticipant)会拥有一组线程，负责诸如日志，消息接收，异步通信等背景任务。这些并不影响你使用库，也就是说，Fast DDS的API是线程安全的，所以你可以尽情的在同一个域成员的不同线程中调用任意方法。但是，这种多线程实现需要考虑当外界函数访问库内线程修改过的数据这种情况。举个例子，监听者回调函数中被修改过的资源。
+
+Fast DDS创建的线程列表如下。传输线程(标记为UDP、TCP、SHM类型)仅仅在对应的传输方式被使用时创建。
+
+| 名称                                   | 类型               | 基数                          | 系统线程名                                                   | 描述                                                         |
+| -------------------------------------- | ------------------ | ----------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| 事件(Event)                            | 常规               | 每个域成员一个                | `dds.ev.<participant_id>`                                    | 处理周期性以及被处罚的事件。<br />参考3.2.1小节              |
+| 探索服务器事件(Discovery Server Event) | 常规               | 每个域成员一个                | `dds.ds_ev.<participant_id>`                                 | 同步对探索服务器的访问<br />参考3.2.1小节                    |
+| 异步写(Asynchronous Writer)            | 常规               | 每个异步流控制者一个，最小为1 | `dds.asyn<paricipant_id>.<async_flow_controller_index>`      | 管理异步写。对于异步writers，一些形式的通信也需要再后台进行初始化<br />参考3.2.1小节 |
+| 数据共享监听者(Datasharing Listener)   | 常规               | 每个DataReader一个            | `dds.dsha.<reader_id>`                                       | 处理通过共享数据接收到的信息的线程<br />参考3.4.1.1小节      |
+| 接收(Reception)                        | UDP                | 每个端口一个                  | `dds.udp.<port>`                                             | 负责处理从UDP接收的数据<br />参考3.1.2.2.13以及6.2.1小节     |
+| 接收(Reception)                        | TCP                | 每个TCP连接一个               | `dds.tcp.<port>`                                             | 负责处理从TCP接收的数据<br />参考6.3.1小节                   |
+| 接受(Accept)                           | TCP                | 每次TCP传输一个               | `dds.tcp_accept`                                             | 负责处理TCP连接请求<br />参考6.3.1小节                       |
+| 保活(Keep Alive)                       | TCP                | 每次TCP传输一个               | `dds.tcp_keep`                                               | 负责TCP连接的保活<br />参考6.3.1小节                         |
+| 接收(Reception)                        | SHM                | 每个端口一个                  | `dds.shm.<port>`                                             | 负责处理通过共享内存段接收的消息<br />参考3.1.2.2.13以及6.4.2小节 |
+| 日志(Logging)                          | SHM                | 每个端口一个                  | `dds.shmd.<port>`                                            | 将传输的数据包存储和转储到文件中<br />参考3.1.2.2.13以及6.4.2小节 |
+| 看门狗(Watchdog)                       | SHM                | 一个                          | `dds.shm.wdog`                                               | 监控共享内存段的健康<br />参考3.1.2.2.13以及6.4.2小节        |
+| 常规日志(General Logging)              | Log                | 一个                          | `dds.log`                                                    | 累加或者写入到合适的日志实体<br />参考9.3小节                |
+| 安全日志(Security Logging)             | Log                | 每个域成员一个                | `dds.slog.<participant_id>`                                  | 累加或者写入安全日志实体<br />参考3.2.1小节                  |
+| 看门狗(Watchdog)                       | Filewatch          | 一个                          | `dds.fwatch`                                                 | 跟踪被监控日志的修改状态<br />参考3.2.3.1小节                |
+| 回调                                   | Filewatch          | 一个                          | `dds.fwatch.cb`                                              | 当被监控文件发生改变时，执行被注册的回调函数<br />参考3.2.3.1小节 |
+| 接收(Reception)                        | TypeLookup Service | 每两个域成员一个              | `dds.tls.replies.<participant_id>`<br />`dds.tls.requests.<participant_id>` | 当远程端点(endpoint)发现了未知类型的数据时执行               |
+
+部分线程仅在特定条件下创建：
+
++ 数据共享监听者(Datasharing listener)线程仅在数据共享使用时创建
++ 探索服务事件线程(Discovery Server Event)仅在域成员被配置为发现服务的服务器时创建
++ TCP保活(Keep alive)线程仅在保活周期(keep alive period)被配置为正数时创建
++ 安全日志以及共享内存包日志线程都需要在配置中配置进行激活
++ 文件监控线程仅在`FASTDDS_ENVIRONMENT_FILE`(第十一章会介绍该环境变量)被使用时激活
+
+对于传输线程，Fast DDS默认使用UDP和共享内存。可以通过配置端口配置来适应特定的部署要求，但是默认是使用元流量(metatraffic)端口以及单播(unicast)用户端口。由于TCP不支持多播，所以这使用于UDP以及共享内存。更多信息在6.8.2小节介绍。
+
+Fast DDS通过3.1.2.2.12小节所提及的线程配置来改变自己创建的线程的对应属性。
+
+#### 2.2.2 事件驱动结构
+
+时间驱动模型可以使Fast DDS对特定条件做出反应，并安排定期操作。因为绝大多数和DDS以及RTPS元数据有关，所以用户只能看到很小一部分。但是，用户可以通过继承`TimeEvent`类来实现周期性的事件。
+
+### 2.3 功能
+
+Fast DDS有一些用户可以在自己应用程序来实现以及配置的特性。大致如下
+
+#### 2.3.1 探索协议(Discovery Protocols)
+
+探索协议定义了DataWriters在指定话题下发布数据以及DataReaders在对应的话题订阅数据，以此来实现数据分享的机制。这适用于通信进程中的任何点。Fast DDS提供了一下探索机制：
+
++ 简单探索(Simple Discovery)：这是默认的探索机制，在[RTPS标准](https://www.omg.org/spec/DDSI-RTPS/2.2)中定义并兼容其他DDS实现。该协议中域成员(DomainParticipants)在早期被发现，并在随后对DataWriter以及DataReader进行配对
++ 探索服务器(Discovery Server):该机制使用集中化探索结构，即服务器充当元流量发现的中心。
++ 静态探索(Static Discovery):这实现了域成员之间的相互探索，但是如果远程域成员已经预先知道了每个域成员(DataReader/DataWriter)实体，则可以跳过这些实体的探索
++ 手动探索(Manual Discovery)：该机制仅兼容RTPS层。它允许用户使用自己选择的任何外部原信息通道手动匹配和取消匹配RTPSParticipant、RTPSWriters以及RTPSReaders
+
+探索协议的配置以及详情在第五章介绍
+
+#### 2.3.2 安全
+
+可以通过在三个级别上实现安全插件来配置Fast DDS提供安全的通信：
+
++ 远程域成员认证。`DDS:Auth:PKI_DH`插件通过使用受信任的证书颁发机构(CA)和ECDSA数字签名算法提供双向认证。它还使用椭圆曲线 Diffie-Hellman （ECDH） 密钥协议建立共享密钥。
++ 实体访问控制。`DDS:Access:permissions`插件提供了在域(Domain)和话题(Topic)级别上域成员访问控制。
++ 数据加密。`DDS:Cryprto:AES-GCM-GMAC`插件使用AES以及AES-GCM提供身份验证的加密
+
+更多信息关于Fast DDS的安全配置在第八章介绍
+
+#### 2.3.3 日志
+
+Fast DDS提供了一个扩展的日志模块。`Log`类是日志系统的入口。它暴露了三个宏定义来简化使用:`EPROSIMA_LOG_INFO`,`EPROSIMA_LOG_WARNING`以及`EPROSIMA_LOG_ERROR`。除了已经定义好的(`INFO_MSG`,`WARN_MSG`以及`ERROR_MSG`)，它还运行自定义新类型。它通过正则表达式来过了消息以及日志系统的行为。日志系统配置的细节可以在第九章阅读。
+
+#### 2.3.4 XML配置文件
+
+Fast DDS通过使用XML配置文件提供修改默认配置的可能性。因此，DDS实体的行为可以在不需要用户实现任何代码或者重新构建已存在的程序的情况下进行修改。
+
+用户拥有每个API功能对应的XMLtag。因此，可以使用`<participant>`来修改域成员(DomainParticipant)或者`<data_writter>`和`<data_reader>`来分别修改DataWriter和DataReader
+
+如何更好的使用XML配置文件，可以阅读第10章
+
+#### 2.3.5 环境变量
+
+环境变量是通过系统功能，将变量定义在程序之外。由于Fast DDS依赖于环境变量，因此用户可以轻松的定制DDS应用。请阅读第十一章来了解环境变量的更多细节。
+
+## ch03 DDS层
+
