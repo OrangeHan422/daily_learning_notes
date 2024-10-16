@@ -1255,3 +1255,115 @@ Fast DDS通过使用XML配置文件提供修改默认配置的可能性。因此
 
 ## ch03 DDS层
 
+eProsima Fast DDS 提供了两套不同的API来提供不同级别的通信。主要的API是数据分发服务(DDS)以数据为中心的发布订阅(DCPS)平台独立模型(Platform Independent Model,aka PIM)API，简称DDS DCPS PIM。该API依据Fast DDS遵守的DDS1.4规范定义。该模块主要解释Fast DDS中该API的主要特性以及用法，深入解释它划分的五个模块：
+
++ 核心(Core)：定义了从其他模块提取出的抽奖类以及接口。它也定义了服务质量(QoS)，同时支持中间件的基于提示(notification-based)交互风格
++ 域(Domain)：包含了作为服务的入口点(entry-point)的域成员(DomainParticipant)类，同时作为许多类的工厂。域成员也作为其他组成服务的对象的容器。
++ 发布者(Publisher)：描述了发布方的发布者(Publisher)和DataWriter以及其对应的监听者(PublisherListener,DataWriterListener)接口。
++ 订阅者(Subscriber)：描述了订阅方的订阅者(Subscriber)和DataReader以及其监听者(SubscriberListener,DataReaderListener)接口
++ 话题(Topic)：描述了通信中的话题(topic)以及数据类型(data type)，包括话题(Topic)和话题描述(TopicDescription)类以及类型支持(TypeSupport)和监听者(TopicListener)接口
+
+### 3.1 核心(Core)
+
+该模块定义了其他模块将要使用的基础类。包含了实体类(Entity)，服务质量策略(QoS policies)以及状态(Status)
+
++ 实体(Entity)：实体是拥有状态(Status)以及策略(Policies)的DDS通信对象
++ 策略(Policy)：管理实体(Entity)的配置类
++ 状态(Status)：每个对象与一个实体关联，其值代表实体(Entity)的通信状态(communication status)。
+
+#### 3.1.1 实体(Entity)
+
+`Entity`是DDS entities的抽象基类，代表着一个支持服务质量策略(QoS policies)，监听者(listener)，以及状态(statuses)的对象
+
+##### 3.1.1.1 实体的类型
+
++ 域成员(DomainParticipant)：该实体是服务的入口点，同时也是发布者、订阅者以及话题的工厂。更多细节在3.2.1小节介绍
++ 发布者(Publisher)：可以创建任意个数的DataWriters。更多细节在3.3.1小节介绍
++ 订阅者(Subscriber)：可以创建任意个数的DataReaders。更多细节在3.4.1小节介绍
++ 话题(Topic)：该实体类似一个通道(channel)关联发布和订阅。更多细节在3.5.3小节介绍
++ DataWriter：负责分发数据的对象。更多细节在3.3.4小节介绍
++ DataReader：负责接收数据的对象。更多细节在3.4.4小节介绍
+
+下图演示了所有DDS实体的等级关系：
+
+![image-20241016183055584](./images/image-20241016183055584.png)
+
+##### 3.1.1.2 常见实体特征
+
+实体概念中，所有的实体类型都有一些共性的特性。比如：
+
+###### 3.1.1.2.1 实体标识(Entity Identifier)
+
+每个实体都被一个唯一ID标识，该标识在DDS实体以及对应的RTPS实体中共享。这个ID存储在实体基类中的一个可以通过getter函数`get_instance_handle()`访问的*实例句柄对象*(Instance Handle object declared on Entity base class)
+
+##### 3.1.1.2.2 服务质量策略(QoS policy)
+
+每个实体的行为可以通过一组配置策略进行配置。对于每个实体类型，都有一个服务质量类（QoS class）将所有影响到该实体类型的策略进行分组。用户可以通过创建一个QoS类，在实体的创建前或者创建后通过实体暴露的接口`set_qos()`(`DomainParticipant::set_qos()`,`Publisher::set_qos()`,`Subscriber::set_qos()`,`Topic::set_qos()`,`DataWriter::set_qos()`,`DataReader::set_qos()`)对实体的策略按需进行更改或者添加。可用的策略以及描述在3.1.2小节描述。QoS类以及其包含的策略将在每个实体类的文档中解释。
+
+##### 3.1.1.2.3 监听者(Listener)
+
+监听者是一个对象，包含了实体在对事件作反应的时候进行调用的函数。因此，监听者扮演一个异步通知系统，允许实体在实体的状态(Status)发生变化时通知应用。
+
+> 橙子注：实际就是回调函数的集合，和muduo库中的TcpServer中的setMsgCallback一样
+
+所有的实体类型都定义了一个监听者接口，包含了当状态(Status)变化时将会触发的回调函数来和应用进行通信。用户可以通过继承这些接口来实现自己应用需要的回调函数。然后可以在实体的创建前或者创建后通过实体暴露的接口`set_listener()`(`DomainParticipant::set_listener()`,`Publisher::set_listener()`,`Subscriber::set_listener()`,`Topic::set_listener()`,`DataWriter::set_listener()`,`DataReader::set_listener()`)将自己定义的监听者链接到每个实体上。每种实体的监听者以及其回调函数将在各实体类型的文档中介绍。当事件发生时，拥有非空监听者并被通过`StatueMask`激活的最低等级实体(lowest level entity)的对应回调函数将被执行。高等级的监听者继承自低等级的监听者，其关系如图：
+
+![image-20241016190552104](./images/image-20241016190552104.png)
+
+> 提示：
+>
+> `on_data_on_readers()`回调函数会在`on_data_available()`之前拦截消息。这就意味着，如果`DomainParticipantListener`被激活，用户应该考虑到默认情况下该监听者使用的是`StatusMask::all()`。正如上图所示，这种情况下`on_data_readers()`将会被调用。如果应用程序想要使用`on_data_available()`，对应的`StatusMask`比特位应该被置否。
+
+> **注意**
+>
+> 使用`StatusMask::none()`创建`Entity`的时候只会禁止标准DDS回调函数：
+>
+> + `on_sample_rejected()`
+> + `on_liveliness_changed()`
+> + `on_requested_deadline_missed()`
+> + `on_requested_incompatible_qos()`
+> + `on_data_available()`
+> + `on_subscription_matched()`
+> + `on_sample_lost()`
+> + `on_offered_incompatible_qos()`
+> + `on_offered_deadline_missed()`
+> + `on_liveliness_lost()`
+> + `on_publication_matched()`
+> + `on_inconsistent_topic()`
+> + `on_data_on_readers()`
+>
+> Fast DDS中独有的回调函数永远保持激活：
+>
+> + `on_participant_discovery()`
+> + `onParticipantAuthentication()`
+> + `on_data_reader_discovery()`
+> + `on_data_writer_discovery()`
+> + `on_unacknowledged_sample_removed()`
+
+> 警告：
+>
+> + 仅有一个线程负责监听所有的监听者，所以应该保持监听者函数简单，将信息的处理留给合适的类。
+> + 不要在任何监听者的成员函数范围内对任何实体进行delete，这会导致未定义行为。建议将监听者类作为一个信息通道，并在上层实体类中对这种行为进行封装。(It is recommended instead to use the Listener class as an information channel an the upper Entity class to encapsulate such behaviour)
+
+##### 3.1.1.2.4 状态(Status)
+
+每个实体类都有一组状态对象，其值代表该实体的通信状态。这些状态值的变化是激活监听者合适的回调函数来异步通知应用程序的诱因。状态对象以及其文字描述在3.1.3小节介绍。在那里你也可以找到那些状态适用于哪些实体。
+
+##### 3.1.1.2.5 状态条件(StatusCondition)
+
+每个实体都有一个StatusCondition，只要被激活的状态发生了变化都会收到通知。StatusCondition提供了实体与等待集(Wait-set)之间的关联。在3.1.4小节会详细介绍。
+
+##### 3.1.1.2.6 激活实体(Enabling Entities)
+
+所有实体不管是否被激活，都可以被创建。默认情况下，工厂被配置为创建被激活的实体。但是可以通过EntityFactoryQosPolicy（3.1.2.1小节）对激活工厂(enabled factory)进行改变。非激活工厂(disbled factory)会忽略其QoS创建非激活实体。非激活实体被限制为仅支持以下操作：
+
++ 设置/获取实体的QoS策略
++ 设置/获取实体的监听者
++ 创建/删除 子实体(subentities)
++ 获取实体的状态，尽管状态值不会发生变化
++ 查找操作（Lookup operations）
+
+任何其他的函数调用，将会返回`NOT_ENABLED`。
+
+#### 3.1.2 策略
+
