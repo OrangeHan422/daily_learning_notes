@@ -1096,3 +1096,282 @@ biolatency(8)跟踪磁盘IO延迟（即从向设备发出请求到请求完成�
 biosnoop(8)将每一次磁盘IO请求打印出来，包含延迟之类的细节信息。第九章会借一步介绍biosnoop(8)
 
 #### 3.4.6 cachestat
+
+![image-20241018090346675](./images/image-20241018090346675.png)
+
+cachestat(8)每秒(可指定时长)打印一行摘要信息，展示文件系统缓存的统计信息。可以使用这个工具发现缓存命中率较低的问题。第八章会进一步介绍cachestat(8)。
+
+#### 3.4.7 tcpconnect
+
+![image-20241018090625192](./images/image-20241018090625192.png)
+
+tcpconnect(8)会在每次TCP连接建立(eg,通过connect()调用)时，打印一行信息，包含原地址、目的地址。第十章会详细介绍tcpconnect(8)。
+
+#### 3.4.8 tcpaccept
+
+![image-20241018090828108](./images/image-20241018090828108.png)![image-20241018090904707](./images/image-20241018090904707.png)
+
+tcpaccept(8)每当有别动的TCP连接建立时，就会打印一行信息，同样包含源地址和目的地址。第十章会详细介绍tcpaccept(8)。
+
+#### 3.4.9 tcpretrans
+
+![image-20241018091033112](./images/image-20241018091033112.png)
+
+每次TCP重传数据包时，tcpretrans(8)会打印一行记录，包含源地址和目的地址，以及当时该TCP连接所处的内核状态。
+
+TCP重传会导致延迟和吞吐量方面的问题。如果重传发生在TCP ESTABLISHED状态下，会进一步寻找外部网络可能存在的问题。如果重传发生在SYN_SENT状态下，这可能是CPU饱和的一个征兆，也可能是内核丢包引发的。第十章会进一步介绍tcpretrans(8)
+
+#### 3.4.10 runqlat
+
+![image-20241018091318957](./images/image-20241018091318957.png)![image-20241018091324659](./images/image-20241018091324659.png)
+
+runqlat(8)对线程等待CPU运行的时间进行统计，并打印一个直方图。这可以定位超出预期的CPU等待时间，就原因来说他可能是CPU饱和、配置错误或者调度问题引起的。第六章会进一步介绍runqlat(8)。
+
+#### 3.4.11 profile
+
+![image-20241018091523478](./images/image-20241018091523478.png)
+
+profile(8)是一个CPU剖析器，该工具可以用来理解哪些代码路径消耗了CPU资源。它周期性地对调用栈进行采样，然后将消重后的调用栈连同出现的次数一起打印出来。第六章会详细介绍profile(8)。
+
+## 第四章 BCC
+
+BPF编译器集合(BPF Compiler Collection，简写为BCC，有时候也以小写形式出现，那时bcc是项目名字和软件包的名字)是一个开源项目，包含了用于构建BPF软件的编译器框架和库。是BPF的主要前端项目，别后有BPF开发者的支持，内核最新BPF跟踪特性通常会首先被应用在这里。
+
+### 4.1 BCC的组件
+
+BCC源代码文件目录结构如下：
+
+![image-20241018092310052](./images/image-20241018092310052.png)
+
+### 4.2 BCC的特性
+
+#### 4.2.1 BCC的内核态特性
+
+BCC会使用不少内核态的特性，如BPF、kprobes、uprobes等。下列清单的括号中包含了一些实现细节，这些在第二章介绍过：
+
++ 动态插桩，内核态（kprobes的BPF支持）
++ 动态插桩，用户态（uprobes的BPF支持）
++ 静态跟踪，内核态（跟踪点的BPF支持）
++ 时间采样事件（BPF，使用`perf_event_open()`）
++ PMC事件（BPF，使用`perf_event_open()`）
++ 过滤（使用BPF程序）
++ 调试打印输出（使用`bpf_trace_printk()`）
++ 基于每个事件的输出（使用`bpf_perf_event_open()`）
++ 基础变量（全局和每线程专属变量，通过BPF映射表实现）
++ 关联数组（associative array，通过BPF映射实现）
++ 频率统计（通过BPF映射表实现）
++ 直方图（支持以2的幂为区间，或线性以及自定义区间，通过BPF映射表实现）
++ 时间戳和时间差（通过`bpf_ktime_get_ns()`和BPF程序实现）
++ 调用栈信息，内核态（通过BPF stackmap实现）
++ 调用栈信息，用户态（通过BPF stackmap实现）
++ 可覆盖的环形缓冲区（通过`perf_event_attr.write_backward`实现）
++ 低成本开销的插桩支持（BPF JIT，以及在BPF映射表中进行统计）
++ 生产环境安全性（BPF验证器）
+
+#### 4.2.2 BCC的用户态特性
+
+BCC用户态前端和BCC代码仓库中提供了一下用户态的特性：
+
++ 静态跟踪，用户态（通过uprobes实现的SystemTap风格的USDT探针）
++ 调试打印输出（通过Python使用`BPF.trace_pipe()`和`BPF.trace_fields()`）
++ 基于每个事件的输出（BPF_PERF_OUTPUT宏和`BPF.open_perf_buffer()`）
++ 周期性输出（`BPF.get_table()`和`table.clear()`）
++ C结构体成员访问，内核态（将BCC重写器映射到`bpf_probe_read()`结果上）
++ 内核态的符号解析（`ksym()`和`ksymaddr()`）
++ 用户态的符号解析（`usymaddr()`）
++ 调试信息符号的解析支持
++ BPF跟踪点支持（TRACEPOINT_PROBE）
++ BPF调用栈回溯支持（BPF_STACK_TRACE）
++ 各种其他辅助宏和函数
++ 示例（在`/examples`目录下）
++ 工具（在`/tools`目录下）
++ 新手指引（在`/docs/tutorial*.md`中）
++ 参考手册（在`/docs/reference_guide.md`中）
+
+### 4.3 安装BCC
+
+可以查看BCC仓库中的INSTALL.md文件
+
+#### 4.3.1 内核要求
+
+主要的内核BPF组件都是在内核4.1到4.9版本之间发布的。推荐使用相对较新的内核版本
+
+需要开启一下内核配置选项：CONFIG_BPF=y、CONFIG_BPF_SYSCALL=y、CONFIG_BPF_EVENTS=y、CONFIG_BPF_JIT=y以及CONFIG_HAVE_EBPF_JIT=y。一般情况下，在很多Linux发行版中是默认开启的，所以一般不需要自己进行变更。
+
+### 4.4 BCC的工具
+
+![image-20241018134942653](./images/image-20241018134942653.png)
+
+![image-20241018135151306](./images/image-20241018135151306.png)
+
+#### 4.4.1 重点工具
+
+| 主题         | 重点工具                                                     | 章节 |
+| ------------ | ------------------------------------------------------------ | ---- |
+| 调试/多用途  | trace、argdist、funccount、stackcount、opensnoop             | 4    |
+| CPU相关      | execsnoop、runqlat、runqlen、cpudist、profile、offcputime、syscount、softirq、hardirq | 6    |
+| 内存相关     | memleak                                                      | 7    |
+| 文件系统相关 | opensnoop、filelife、vfsstatt、fileslower、cachestat、writeback、dcstat、xfsslower、xfsdist、ext4dist | 8    |
+| 磁盘IO相关   | biolatency、biosnoop、biotop、bitesize                       | 9    |
+| 网络相关     | tcpconnect、tcpaccept、tcplife、tcpretrans                   | 10   |
+| 安全相关     | capable                                                      | 11   |
+| 编程语言相关 | javastat、javacalls、javathreads、javaflow、javagc           | 12   |
+| 应用程序相关 | mysqld_qslower、signals、killsnoop                           | 13   |
+| 内核相关     | wakeuptime、offwaketime                                      | 14   |
+
+#### 4.4.2 工具的特点
+
+BCC工具有以下共同特点：
+
++ 每一个都解决了实际的观测性问题，有其创建的必要性
++ 它们设计为在生产环境由root用户来使用
++ 每个工具都有一个对应的man帮助文档
++ 每个工具都配备了示例文件，其中有实力输出以及对输出的解释（在`tools/*_example.txt`文件中）
++ 很多工具都接收启动选项和参数，大部分工具在使用-h选项时会打印帮助信息。
++ 工具源代码以一段注释开始
++ 工具源代码遵循统一的风格（使用pep8工具进行统一检查）
+
+为了保持风格的一致，新工具的加入需要由BCC维护者审阅，工具作者需要遵守BCC工具的开发指南:BCC CONTRIBUTING_SCRIPTS.md
+
+尽管BCC支持不同的语言前端，但BCC工具中的用户态组件主要使用是Python语言，内核态BPF程序则主要使用C语言完成。
+
+贡献者指南一条建议：“编写工具以解决特定问题，切勿贪多”。是在鼓励尽可能开发单一功能的工具，而非多用途的工具。（直接给我的大杂烩梦想干碎了）
+
+#### 4.4.3 单一用途工具
+
+UNIX哲学：专注做一件事，并把它做好(do one thing and do it well)。换一种说法是：创建小的高质量的工具，使用管道(pipe)将其连接起来以完成更复杂的任务。如grep(1)、cut(1)和sed(1)等。
+
+BCC中单一功能工具：opensnoop(8)、execsnoop(8)和biolatency(8)。以opensnoop(8)为例，思考对于跟踪open(2)系列系统调用这个单一任务来讲，这些选项和输出可以如何组合：
+
+![image-20241018153404088](./images/image-20241018153404088.png)![image-20241018153414879](./images/image-20241018153414879.png)
+
+这些单一功能工具，相对来说易于维护以及新手友好。
+
+#### 4.4.4 多用途工具
+
+多用途工具优势：
+
++ 更好的可见性：不局限于分析单一的任务或者目标，而是可以同时观测多个不同组件
++ 减少代码重复：可以避免多个工具中存在相似的代码片段
+
+在BCC中，最强大的多用途工具是funccount(8)、stackcount(8)、trace(8)以及argdist(8)。这些多用途工具通常需要用户来决定跟踪哪些事件。不过为了享受这些灵活性，用户需要知道使用了哪些kprobes、uprobes以及其他事件等细节。
+
+### 4.5 funccount
+
+funccount(8)的主要作用为：
+
++ 某个内核态或用户态函数是否被调用过
++ 该函数每秒被调用了多少次
+
+出于运行效率考虑，funccount(8)在内核中使用一个BPF映射表数据结构维护事件的计数，这样它仅需将总数汇报该用户态。相比先将全部事件输出到用户态再进行处理的方式，该方式可以显著降低funccount(8)的开销。但是超高频的事件仍然可能导致不可忽略的额外开销。如，内存分配函数(`malloc()`、`free()`)如果使用funccount(8)进行跟踪，可能会造成高达30%的额外开销。第18章可以了解典型事件频率和对应的开销。
+
+#### 4.5.1 funccount的示例
+
+1.内核函数tcp_drop函数是否被调用：
+
+![image-20241021090049689](./images/image-20241021090049689.png)
+
+上述例子在开始到Ctrl+C之前，tcp_drop共调用了3次
+
+2.内核中调用最频繁的虚拟文件系统(VFS)是那个
+
+![image-20241021090209612](./images/image-20241021090209612.png)
+
+可以看到，调用最频繁的是`vfs_write`函数
+
+3.用户态的pthread_mutex_lock()**每秒**被调用的次数是多少？
+
+![image-20241021090329020](./images/image-20241021090329020.png)![image-20241021090334926](./images/image-20241021090334926.png)
+
+该函数对C函数库进行了插桩，针对范围是全系统的。
+
+4.全系统内，libc库中调用最频繁的与字符串相关的函数是那个？
+
+![image-20241021090547960](./images/image-20241021090547960.png)
+
+5.执行最频繁的系统调用是那个？
+
+![image-20241021090622398](./images/image-20241021090622398.png)![image-20241021090628005](./images/image-20241021090628005.png)
+
+可是使用不同高度事件源回答。该例中，作者使用了syscalls系统中的跟踪点来匹配全部系统调用入口(`sys_enter_*`)。该例中，最频繁的系统调用是futex()
+
+#### 4.5.2 funccount的语法
+
+funccount(8)的命令行参数包括可以用来改变行为的选项，以及一个描述被插桩事件的字符串：
+
+```shell
+funccount [options] eventname
+```
+
+eventname的语法是：
+
++ `name`或者`p:name`：对内核函数`name()`进行插桩(p means probe?)
++ `lib:name` 或者 `p:lib:name`：对用户态lib库中的函数`name()`进行插桩
++ `path:name`：对位于path路径下文件中的用户态函数`name()`进行插桩
++ `t:system:name`：对名为`system:name`的内核跟踪点进行插桩(t means tracepoint?)
++ `u:lib:name`：对lib库中名为`name`的USDT探针进行插桩
++ `*`：通配符。`-r`选项允许使用正则表达式
+
+funccount(8)在对内核和用户态函数进行插桩时，分别使用了kprobes和uprobes
+
+#### 4.5.3 funccount的单行程序
+
+对虚拟文件系统(VFS)内核函数进行计数：
+
+```bash
+funccount 'vfs_*'
+```
+
+对TCP内核函数进行计数：
+
+```bash
+funccount 'tcp_*'
+```
+
+统计每秒TCP发送函数的调用次数：
+
+```bash
+funccount -i 1 'tcp_send*'
+```
+
+展示每秒块IO事件的数量：
+
+```bash
+funccount -i 1 't:block:*'
+```
+
+展示每秒新创建的进程数量：
+
+```bash
+funccount -i t:sched:sched_process_fork
+```
+
+展示每秒libc中`getaddrinfo()`（域名解析）的调用次数：
+
+```bash
+funccount -i 1 c:getaddrinfo
+```
+
+对libgo中全部的`os.*`调用进行计数：
+
+```bash
+funccount 'go:os.*'
+```
+
+#### 4.5.4 funccount的帮助信息
+
+```bash
+funccount -h
+```
+
+### 4.6 stackcount
+
+stackcount(8)对导致某事件发生的函数调用栈进行计数。和funccount(8)一样，事件源可以是内核态或者用户态函数、内核跟踪点或者USDT探针。主要作用为：
+
++ 某个事件为什么会被调用？调用的代码路径是什么？
++ 有哪些不同的代码路径会调用该事件，调用频次如何？
+
+出于对性能的考虑，stackcount(8)在内核中使用一种特殊的、调用栈信息专用的BPF映射表结构进行统计。用户空间读取调用栈ID和统计数字，然后从BPF映射表中取出调用栈信息，在进行符号翻译和打印输出。和funccount(8)一样，工具的开销取决于被插桩事件的发生频率，且预期该工具开销会比funccount(8)高，毕竟需要调用栈回溯以及记录。
+
+#### 4.6.1 stackcount的示例
+

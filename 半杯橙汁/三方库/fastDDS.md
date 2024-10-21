@@ -1377,3 +1377,228 @@ eProsima Fast DDS 提供了两套不同的API来提供不同级别的通信。�
 
 #### 3.1.2.1 标准QoS策略
 
+##### 3.1.2.1.1 限期QoS策略(DeadlineQosPolicy)
+
+当新样本的频率低于特定频率时，该策略会发出警告。适用于数据需要周期性的更新这种情况。（参考19.1.1.7.5小节）
+
+在发布方，限期定义了应用程序应该提供新样本的最大期限。在订阅方，则是定义了接收新样本的最大期限。
+
+对于带键（key）的话题，这种QoS通过键（key）来应用。假设一些汽车的位置需要周期性的发布。这种情况下，可以将汽车的ID设置为数据类型的键（key），使用限期QoS来设置期望的发布周期。
+
+QoS策略的数据成员有：
+
+| 数据成员名 | 类型         | 默认值           |
+| ---------- | ------------ | ---------------- |
+| `period`   | `Duration_t` | `c_TimeInfinite` |
+
+> 提醒：
+>
+> 该QoS策略应用在Topic,DataReader以及DataWriter实体上
+>
+> 在已激活的实体上是可以被更改的
+
+> 警告：
+>
+> DataReaders和DataWriters的匹配，必须遵守兼容性原则。
+
+**兼容性原则**
+
+为了保持DataReaders和DataWriters中限期QoS策略之间的兼容性，提供的限期时长（在DataWriter上配置的）必须小于等于请求的限期时长（在DataReader上配置的），否则，这些实体被认为不兼容的。（橙子注：简言之就是我想读的时候必须要有数据）
+
+限期QoS策略必须和*基于时间过滤QoS策略*（TimeBasedFilterQosPolicy,3.1.2.1.18）保持一致，意味着限期时长必须大于等于最小间隔。
+
+**示例**
+
+```c++
+//该示例使用DataWriter示例，但是所有内容同样适用于DataReader和Topic
+DataWriterQos writer_qos;
+// 限期QoS策略默认期限是无穷
+// 将期限设置为1s
+writer_qos.deadline().period.seconds = 1;
+writer_qos.deadline().period.nanosec = 0;
+// 在对应的实体创建中使用修改过的QoS
+writer_ = publisher_->create_datawriter(topic_,writer_qos);
+```
+
+```XML
+<data_writer profile_name="writer_xml_conf_deadline_profile">
+    <qos>	
+        <deadline>
+            <period>
+                <sec>1</sec>
+            </period>
+        </deadline>
+    </qos>
+</data_writer>
+
+<data_reader profile_name="reader_xml_conf_deadline_profile">
+    <qos>
+        <deadline>
+            <period>
+                <sec>1</sec>
+            </period>
+        </deadline>
+    </qos>
+</data_reader>
+```
+
+##### 3.1.2.1.2 目的地顺序QoS策略(DestinationOrderQoSPolicy)
+
+> 警告：
+>
+> 该策略将在未来版本中实现
+
+多个DataWriter可以使用同一个键（key）在相同的Topic发送信息，同时在DataReader中，所有这些信息被存储在相同的数据实例中（参考19.1.1.7.6）（橙子注：FIXME：Multiple DataWriters can send messages in the same Topic using the same key,and on the DataReader side all those messages are stored within the same instance of data）。该QoS策略用来作为决定这些消息的逻辑顺序的准则。体系的行为依赖于*目的地顺序QoS策略种类*（DestinationOrderQosPolicyKind）的值。
+
+QoS策略数据成员如下：
+
+| 数据成员名称 | 类型                          | 默认值                                        |
+| ------------ | ----------------------------- | --------------------------------------------- |
+| `kind`       | DestinationOrderQosPolicyKind | `BY_RECEPTION_TIMESTAMP_DESTINATIONORDER_QOS` |
+
+> 提醒：
+>
+> 该QoS策略应用在Topic,DataReader以及DataWriter实体上
+>
+> 在已激活的实体上是**不**可以被更改的
+
+> 警告：
+>
+> DataReaders和DataWriters的匹配，必须遵守兼容性原则。
+
+**目的地顺序QoS策略种类(DestinationOrderQosPolicyKind)**
+
+两个可能的值：
+
++ `BY_RECEPTION_TIMESTAMP_DESTINATIONORDER_QOS`:该策略使用DataReader中的接收时间作为依据，这意味着，最后一个接收的数据则是被保留的数据。这个选项可能会导致每个DataReader最后以不同的最终值结束，因为DataReaders可以在不同的时间接受数据
++ `BY_SOURCE_TIMESTAMP_DESTINATIONORDER_QOS`:该策略使用DataWriter中的发送时间戳作为依据。该选项确保最终值的一致性。
+
+两个选项都依赖于*所有权策略*（OwnershipQosPolicy）以及*所有权长度策略*（OwnershipStrengthQosPolicy），意味着如果所有权(Ownership)设置为EXCLUSIVE，同时最后一个从DataWriter中获取的值带有较低的所有权，那么该数据将会被忽略。
+
+**兼容性原则**
+
+为了在DataReaders和DataWriters拥有不同值时保持*目的地顺序策略*(DestinationOrderQosPolicy)的兼容性,DataWriter类型必须大于等于DataReader类型。不同类型之间的顺序为：
+
+`BY_RECEPTION_TIMESTAMP_DESTINATIONORDER_QOS` < `BY_SOURCE_TIMESTAMP_DESTINATIONORDER_QOS`
+
+可能的组合：
+
+| DataWriter类型                                | DataReader类型                                | 兼容性 |
+| --------------------------------------------- | --------------------------------------------- | ------ |
+| `BY_RECEPTION_TIMESTAMP_DESTINATIONORDER_QOS` | `BY_RECEPTION_TIMESTAMP_DESTINATIONORDER_QOS` | 是     |
+| `BY_RECEPTION_TIMESTAMP_DESTINATIONORDER_QOS` | `BY_SOURCE_TIMESTAMP_DESTINATIONORDER_QOS`    | 否     |
+| `BY_SOURCE_TIMESTAMP_DESTINATIONORDER_QOS`    | `BY_RECEPTION_TIMESTAMP_DESTINATIONORDER_QOS` | 是     |
+| `BY_SOURCE_TIMESTAMP_DESTINATIONORDER_QOS`    | `BY_SOURCE_TIMESTAMP_DESTINATIONORDER_QOS`    | 是     |
+
+##### 3.1.2.1.3 持续策略（DurabilityQosPolicy）
+
+即使没有DataReader，DataWriter也可以通过话题发送消息。此外，DataReader也可以在话题已经被写入了一些数据时加入话题，并对感兴趣的信息进行访问（参考19.1.1.7.9）
+
+*持续策略*（DurabilityQosPolicy）定义了在DataReader加入话题之前系统如何处理这些样本。该体系的行为依赖于*持续策略类型*（DurabilityQosPolicyKind）
+
+策略数据成员：
+
+| 数据成员 | 类型                    | 默认值                                                       |
+| -------- | ----------------------- | ------------------------------------------------------------ |
+| `kind`   | DurabilityQosPolicyKind | DataReader为`VOLATILE_DURABILITY_QOS`，DataWriter为`TRANSIENT_LOCAL_DURABILITY_QOS` |
+
+> 提醒：
+>
+> 该QoS策略应用在Topic,DataReader以及DataWriter实体上
+>
+> 在已激活的实体上是**不**可以被更改的
+
+> 重点：
+>
+> 为了能够在DataReader中获取过去的样本，除了设置这个策略，还需要将*可靠性策略*(ReliabilityQosPolicy)设置为`RELIABLE_RELIABILITY_QOS`
+
+> 警告：
+>
+> DataReaders和DataWriters的匹配，必须遵守兼容性原则。
+
+**持续策略类型（DurabilityQosPolicyKind）**
+
+四个可能的值：
+
++ `VOLATILE_DURABILITY_QOS`：（挥发性）过去的样本会被忽略，新加入的DataReader只会接收到匹配之后生成的消息
++ `TRANSIENT_LOCAL_DURABILITY_QOS`：（短暂的）当新的DataReader加入后，它的缓存(History)将会填入旧样本
++ `TRANSIENT_DURABILITY_QOS`：当新的DataReader加入后，它的缓存(History)将会填入存储在*持久存储区*(persistent storage)的旧样本
++ `PERSISTENT_DURABILITY_QOS`：当新的DataReader加入后，它的缓存(History)将会填入存储在*持久存储区*(persistent storage)的旧样本
+
+**兼容性原则**
+
+为了保持DataReader和DataWriter之间拥有不同类型值时的*持久策略*(DurabilityQosPolicy)，DataWriter的类型必须要大于等于DataReader的类型。不同类型的顺序为：
+
+`VOLATILE_DURABILITY_QOS`<`TRANSIENT_LOCAL_DURABILITY_QOS`<`TRANSIENT_DURABILITY_QOS`<`PERSISTENT_DURABILITY_QOS`
+
+可能的组合：
+
+| DataWriter种类                   | DataReader种类                   | 兼容性 |
+| -------------------------------- | -------------------------------- | ------ |
+| `VOLATILE_DURABILITY_QOS`        | `VOLATILE_DURABILITY_QOS`        | 是     |
+| `VOLATILE_DURABILITY_QOS`        | `TRANSIENT_LOCAL_DURABILITY_QOS` | 否     |
+| `VOLATILE_DURABILITY_QOS`        | `TRANSIENT_DURABILITY_QOS`       | 否     |
+| `TRANSIENT_LOCAL_DURABILITY_QOS` | `VOLATILE_DURABILITY_QOS`        | 是     |
+| `TRANSIENT_LOCAL_DURABILITY_QOS` | `TRANSIENT_LOCAL_DURABILITY_QOS` | 是     |
+| `TRANSIENT_LOCAL_DURABILITY_QOS` | `TRANSIENT_DURABILITY_QOS`       | 否     |
+| `TRANSIENT_DURABILITY_QOS`       | `VOLATILE_DURABILITY_QOS`        | 是     |
+| `TRANSIENT_DURABILITY_QOS`       | `TRANSIENT_LOCAL_DURABILITY_QOS` | 是     |
+| `TRANSIENT_DURABILITY_QOS`       | `TRANSIENT_DURABILITY_QOS`       | 是     |
+
+**示例**
+
+```c++
+//该示例使用DataWriter示例，但是所有内容同样适用于DataReader和Topic
+DataWriterQos writer_qos;
+// 持续策略使用默认值VOLATILE_DURABILITY_QOS构造
+// 将类型设置为TRANSIENT_LOCAL_DURABILITY_QOS
+writer_qos.durability().kind = TRANSIENT_LOCAL_DURABILITY_QOS;
+// 在对应的实体创建中使用修改过的QoS
+writer_ = publisher_->create_datawriter(topic_,writer_qos);
+```
+
+```xml
+<data_writer profile_name="writer_xml_conf_durability_profile">
+    <qos>
+        <durability>
+            <kind>TRANSIENT_LOCAL</kind>
+         </durability>
+    </qos>
+</data_writer>
+
+<data_reader profile_name="reader_xml_conf_durability_profile">
+    <qos>
+        <durability>
+            <kind>VOLATILE</kind>
+        </durability>
+    </qos>
+</data_reader>
+```
+
+##### 3.1.2.1.4 持久服务策略（DurabilityServiceQosPolicy）
+
+> 警告
+>
+> 该策略将在未来版本中实现
+
+该策略是在*持久策略*(DurabilityQosPolicy)被设置为`TRANSIENT_DURABILITY_QOS`或者`PERSISTENT_DURABILITY_QOS`时，对虚构的(fictitious)DataReader和DataWriter的*缓存策略*（HistoryQosPolicy）和*资源限制策略*（ResourceLimitsQosPolicy）进行配置。
+
+这些实体被用来模拟持久化存储。虚构的DataReader读取写入Topic的数据并存储，这样如果用户的DataWriter没有收到用户的DataReader的请求时，虚构的DataWriter就会负责发送那些信息。（The fictitious DataReader reads the data written on the [Topic](https://fast-dds.docs.eprosima.com/en/latest/fastdds/dds_layer/topic/topic.html#dds-layer-topic) and stores it, so that if the user DataWriter does not have the information requested by the user DataReaders, the fictitious DataWriter takes care of sending that information.）（橙子注：个人理解，简而言之就是，为了模拟这个持久策略，实际上是服务底层创建了DataReader和DataWriter，但是对用户透明而已。这样，用户使用起来看起来是没有配对的endpoint也可以正常的操作）
+
+策略中的数据成员：
+
+| 数据成员名                 | 类型                 | 默认值                  |
+| -------------------------- | -------------------- | ----------------------- |
+| `service_cleanup_deplay`   | `Duration_t`         | `c_TimeZero`            |
+| `history_kind`             | HistoryQosPolicyKind | `KEEP_LAST_HISTORY_QOS` |
+| `history_depth`            | `int32_t`            | 1                       |
+| `max_samples`              | `int32_t`            | -1(Length Unlimited)    |
+| `max_instances`            | `int32_t`            | -1(Length Unlimited)    |
+| `max_samples_per_instance` | `int32_t`            | -1(Length Unlimited)    |
+
++ `service_cleanup_delay`：该成员控制服务何时可以清除某个数据实例的所有相关信息。信息会在遇到如下所有条件时清除（必须满足所有条件才会清除）：
+  - 实例被显式的释放（explicitly disposed），并且其*实例状态*(InstanceState)变为`NOT_ALIVE_DISPOSED_INSTANCE_STATE`
+  - 没有存活的DataWriter正在向该实例写数据，意味着所有存在的writers要么被注销（unregister）了，要么就是挂掉了（lose their liveliness）
+  - 自从上述两个条件满足后，已经过了比`service_cleanup_delay`建立的时间间隔更长的事件。
++ `history_kind`：控制和*持久服务*(Durability Service)*虚构实体*(fictitious entities)相关的HistoryQosPolicy种类
++ `history_depth`：
