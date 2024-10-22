@@ -1375,3 +1375,105 @@ stackcount(8)对导致某事件发生的函数调用栈进行计数。和funccou
 
 #### 4.6.1 stackcount的示例
 
+假如在空闲系统上使用funccount(8)时，发现ktime_get()这个内核函数执行频率很高，达到了每秒8k次。该函数是读取系统时间的，为什么空闲的系统需要如此高的频率读取时间？
+
+下例为使用stackcount(8)来定位导致ktime_get()调用的代码路径：
+
+![image-20241022085707071](./images/image-20241022085707071.png)
+
+实际的输出较长，这里做了截断。在每个调用栈中，一行信息对应一个函数，然后是该调用栈的次数。
+
+使用-P选项可以让调用栈包含进程的名字和PID：
+
+![image-20241022085857278](./images/image-20241022085857278.png)![image-20241022085902417](./images/image-20241022085902417.png)
+
+进程PID为0，名称为“swapper/2”
+
+#### 4.6.2 stachcount的火焰图
+
+最初的火焰图软件将调用栈作为输入，一行对应一个调用栈，帧（函数名）直降使用分号进行分隔，每行的结尾是一个空格和计数。stackcount(8)可以使用-f选项生成这种格式。
+
+下例会对ktime_get()持续跟踪10秒(-D 10)，区分每个进程(-P)，并生成一张火焰图：
+
+```shell
+# stackcount -f -P -D 10 ktime_get > out.stackcount01.txt
+$ wc out.stackcount01.txt
+1586	3425 387761 out.stackcount01.txt
+$ git clone http://github.com/brendangregg/FlameGraph
+$ cd FlameGraph
+$ ./flamegraph.p1 --hash --bgcolors=grey < ../out.stackcout01.txt > out.stackcount01.svg
+```
+
+这里使用的工具wc(1)来显示输出的总行数1586——也就是有这么多不同调用栈和进程名字的组合。下图显示了最后生成SVG文件的截屏：
+
+![image-20241022090649729](./images/image-20241022090649729.png)
+
+该图显示了，大部分ktime_get()函数调用来自8个空闲线程——每个线程对应一个CPU，直观看起来它们拥有相似的调用“塔”。火焰图左侧那些比较窄的“塔”中还有一些其他来源。
+
+#### 4.6.3 stackcount残缺的调用栈
+
+在第2、第12和18章中会对调用栈以及其在实际使用中会遇到的问题进行讨论。调用栈信息不完整和符号缺失是常见的问题。
+
+作为例子，先前调用栈中显示tick_nohz_idle_enter()调用了ktime_get()，然而这并没有在源代码中出现。代码中倒是有一个对idle_nohz_start_idle()的调用，其定义如下(kernel/time/tick-sched.c)：
+
+![image-20241022091947977](./images/image-20241022091947977.png)
+
+代码行数很短，可能被编译器内联了，所以就导致抓取到的栈调用关系显示了父函数直接调用了ktime_get()。在/proc/kallsysms文件中没有tick_nohz_start_idle这个符号，进一步印证它被内联了。
+
+#### 4.6.4 stackcount的语法
+
+stackcount(8)的参数定义了被插桩的函数：
+
+```shell
+stackcount [option] eventname
+```
+
+eventname的语法和funccount(8)一致。
+
++ `name`或者`p:name`：对内核函数`name()`进行插桩(p means probe?)
++ `lib:name` 或者 `p:lib:name`：对用户态lib库中的函数`name()`进行插桩
++ `path:name`：对位于path路径下文件中的用户态函数`name()`进行插桩
++ `t:system:name`：对名为`system:name`的内核跟踪点进行插桩(t means tracepoint?)
++ `u:lib:name`：对lib库中名为`name`的USDT探针进行插桩
++ `*`：通配符。`-r`选项允许使用正则表达式
+
+#### 4.6.5 stackcount的单行程序
+
+对创建块IO的函数调用栈进行计数：
+
+```shell
+stackcount t:block:block_rq_insert
+```
+
+对发送IP数据包的调用栈进行计数：
+
+```shell
+stackcount ip_output
+```
+
+对发送IP数据包的调用栈进行计数，同时显示对应的PID：
+
+```shell
+stackcount -P ip_output
+```
+
+对导致线程阻塞并且导致脱离CPU的调用栈进行计数：
+
+```shell
+stackcount t:sched:sched_switch
+```
+
+对导致系统调用read()的调用栈进行计数：
+
+```shell
+stackcount t:syscalls:sys_enter_read
+```
+
+#### 4.6.6 stackcount的帮助信息
+
+```shell
+stackcount -h
+```
+
+### 4.7 trace
+

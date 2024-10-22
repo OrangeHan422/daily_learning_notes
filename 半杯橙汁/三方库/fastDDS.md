@@ -1601,4 +1601,107 @@ writer_ = publisher_->create_datawriter(topic_,writer_qos);
   - 没有存活的DataWriter正在向该实例写数据，意味着所有存在的writers要么被注销（unregister）了，要么就是挂掉了（lose their liveliness）
   - 自从上述两个条件满足后，已经过了比`service_cleanup_delay`建立的时间间隔更长的事件。
 + `history_kind`：控制和*持久服务*(Durability Service)*虚构实体*(fictitious entities)相关的HistoryQosPolicy种类
-+ `history_depth`：
++ `history_depth`：控制和*持久服务*(Durability Service)*虚构实体*(fictitious entities)相关的HistoryQosPolicy深度
++ `max_samples`：控制和*持久服务*(Durability Service)*虚构实体*(fictitious entities)相关的*资源限制策略*(ResourceLimitsQosPolicy)设置的最大样本数量。该值必须必每个实例的最大样本数量更高。
++ `max_instances`：控制和*持久服务*(Durability Service)*虚构实体*(fictitious entities)相关的*资源限制策略*(ResourceLimitsQosPolicy)的实例个数
++ `max_samples_per_instance`：控制和*持久服务*(Durability Service)*虚构实体*(fictitious entities)相关的单个*资源限制策略*(ResourceLimitsQosPolicy)实例的最大样本数量。该值必须低于最大样本数量。
+
+> 提示：
+>
+> 该策略同样适用于Topic以及DataWriter实体
+>
+> 该策略**不**能在已激活实体上改变
+
+##### 3.1.2.1.5 实体工厂策略(EntityFactoryQosPolicy)
+
+该策略控制作为其他实体的工厂的实体的行为。默认情况下，所有的实体都是以激活(enabled)方式创建的，但是如果你将`autoenable_created_entities`设置为`false`，新的实体将会以非激活方式(disalbed)创建。
+
+策略数据成员：
+
+| 数据成员名                    | 类型   | 默认值 |
+| ----------------------------- | ------ | ------ |
+| `autoenable_created_entities` | `bool` | `true` |
+
+> 提示：
+>
+> 该策略适用于*域成员工厂*(DomainParticipantFactory)（作为域成员的工厂），*域成员*(DomainParticipant)（作为Publisher,Subscriber和Topic的工厂），Publisher（作为DataWriter的工厂）以及Subscriber（作为DataReader的工厂）。
+>
+> 该策略可以在已激活的实体上更改，但是仅作用于在更改后创建的实体。
+
+**示例**
+
+```c++
+//该实例使用Participant，但是该示例同样适用DomainParticipantFactory，Publisher以及Subscriber实体
+DomainParticipantQos participant_qos;
+//EntityFactoryQosPolicy默认以autoenable_created_entities = true创建，这里改为false
+participant_qos.entity_factory().autoenable_created_entities = false;
+// 通过修改过的策略创建对应的实体
+participant_ = factory_->create_participant(domain,participant_qos);
+```
+
+> 该策略暂时不能以XML形式配置
+
+##### 3.1.2.1.6 组数据策略(GroupDataQosPolicy)
+
+允许用户在创建Publisher或者Subscriber时添加附带信息。该数据对Publisher/Subscriber拥有的所有DataWriter/DataReader都一样，该数据通过内置的话题进行传播。
+
+该策略可以和DataReader和DataWriter的监听者结合，来实现一个类似*划分策略*(PartitionQosPolicy)的配对策略(matching policy).
+
+策略的数据成员:
+
+| 数据成员名 | 类型                 | 默认值 |
+| ---------- | -------------------- | ------ |
+| collection | std::vecotr<`octet`> | 空     |
+
+> 提示：
+>
+> 该策略适用于Publisher和Subscriber实体
+>
+> 该策略可以在激活实体上改变
+
+**示例**
+
+```c++
+//该实例使用Publisher，但是同样适用于Subscriber
+PublisherQos publisher_qos;
+// 默认情况下组数据策略（GroupDataQosPolciy）使用空的collection创建
+// Collection是一个私有成员，所以需要通过setter以及getter获取和访问。
+
+//初始化向collection中添加数据
+std::vector<eprosima:fastdds::rtps::octet> vec;
+// 向数组职工添加两个数据
+eprosima::fastdds::rtps::octet val = 3;
+vec.push_back(val);
+val = 10;
+vec.push_back(val);
+publisher_qos.group_data().data_vec(vec); //setter
+// 使用修改过的策略创建对应的实体
+publisher_ = participant_->create_publisher(publisher_qos);
+
+// 在运行时向collection添加数据
+vec = publisher_qos.group_data().data_vec();
+val = 31;
+vec.push_back(val);
+publisher_qos.group_data().data_vec(vec);//setter
+// 对对应的实体进行更新
+publiser_->set_qos(publisher_qos);
+```
+
+```xml
+<data_writer profile_name="writer_xml_conf_groupdata_profile">
+    <qos>
+        <groupData>
+            <value>3.a</value>
+        </groupData>
+    </qos>
+</data_writer>
+
+<data_reader profile_name="reader_xml_conf_groupdata_profile">
+    <qos>
+        <groupData>
+            <value>3.a</value>
+        </groupData>
+    </qos>
+</data_reader>
+```
+
