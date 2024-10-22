@@ -1,6 +1,26 @@
 # C++TemplatesV2
 
 > 个人学习笔记总结，感谢[大佬](https://github.com/xiaoweiChen/Cpp-Templates-2nd)翻译。
+>
+> 2024-10-22：感谢译者提供翻译，但是翻译的并不适合个人学习，所以只能硬着头皮啃原版了，所以，可能不算笔记了，又是一份翻译。
+>
+> > eg:2.4节原文：However, when trying to *declare* the friend function and *define* it afterwards, things become more complicated.
+> >
+> > 而翻译则是：
+> >
+> > 但当试图声明友元函数并实现时，事情会变得更加复杂
+> >
+> > 
+> >
+> > 个人认为，这是完全错误的，afterwards这么关键的词语竟然忽略了。对于技术类书籍，个人认为这是难以忍受的。正确的翻译应该为：
+> >
+> > 然而，当我们想要声明一个友元函数，并在之后定义该函数，事情就会变的复杂。
+> >
+> > 
+> >
+> > 意思为如果将函数的声明和定义分开，问题会变的棘手。而非译文的声明友元并实现。后面的`forward declare`翻译的是“转发声明”，个人理解应该是“前向声明”，而不是翻译为`std::forward`的中文术语“转发”。开始读翻译版可把我搞蒙了，满脑子都是《人在囧途》王宝强的“啥，啥，啥，这写类都是啥”。
+>
+> TODO：添加C++20模板知识，尤其是概念和约束
 
 ## 第一部分：基础知识
 
@@ -400,3 +420,394 @@ int max(int a,int b){
 ```
 
 ### 第二章：类模板
+
+#### 2.1 实现stack类模板
+
+```c++
+#include <vector>
+#include <cassert>
+
+template<typename T>
+class Stack{
+private:
+    std::vector<T> elems_;
+
+public:
+    void push(const T& elem);
+    void pop();
+    const T& top() const;
+    bool empty() const{
+        return elems_.empty();
+    }
+};
+
+template<typename T>
+void Stack<T>::push(const T& elem){
+    elems_.push_back(elem);
+}
+
+template<typename T>
+void Stack<T>::pop(){
+    assert(!elems_.empty());
+    elems_.pop_back();
+}
+
+template<typename T>
+const T& Stack<T>::top() const{
+    assert(!elems_.empty());
+    return elems_.back(); // return copy of last element
+}
+```
+
+##### 2.1.1 声明类模板
+
+声明类模板类似于声明函数模板。声明钱，必须将一个或多个标识符声明为类型参数。
+
+```c++
+template<typename T>
+class TemplateClass{
+  ...  
+};
+```
+
+类模板内部，可以像使用其他类型一样使用T来声明成员和成员函数
+
+```c++
+template<typename T>
+class Stack{
+private:
+    std::vector<T> elems_;
+
+public:
+    void push(const T& elem);
+    void pop();
+    const T& top() const;
+    bool empty() const{
+        return elems_.empty();
+    }
+};
+```
+
+这个类的类型是`Stack<T>`,T是模板参数。因此，除了可以推导的模板参数，只要在使用该类的类型时，就必须使用`Stack<T>`声明。如果在类模板中使用类名，但是不带模板参数，表明这个内部类的模板参数类型和模板类的参数类型相同。（详见13.2.3节）
+
+例如，必须声明自定义的复制构造函数和赋值操作符：
+
+```c++
+template<typename T>
+class Stack{
+  Stack(const Stack&);//copy ctor
+  Stack& operator=(const Stack&);//assigenment operator
+};
+//等价与
+template<typename T>
+class Stack{
+  Stack(const Stack<T>&);//copy ctor,注意，在需要类名而非类类型的地方，只能使用Stack。尤其是构造和析构函数名称
+  Stack<T>& operator=(const Stack<T>&);//assigenment operator
+};
+```
+
+##### 2.1.2 成员函数
+
+要定义类模板的成员函数，必须将其指定为模板，并且使用类模板对类型进行限定。如：
+
+```c++
+template<typename T>
+void Stack<T>::push(const T& elem){ //注意Stack<T>
+    elems_.push_back(elem);
+}
+```
+
+#### 2.2 使用Stack类模板
+
+C++17之前，要使用类模板的对象，必须显示指定模板参数。
+
+> C++17引入类参数模板推导，若模板参数可以从构造函数派生，则可以跳过这些参数。具体在2.9节讨论。
+
+```c++
+int main() {
+    Stack<std::string> s;
+    s.push("test");
+    std::cout << s.top() << std::endl;
+    s.pop();
+    return 0;
+}
+```
+
+注意，代码支队调用的模板函数实例化。对于类模板，只有在成员函数被使用时才实例化。这样做可以节省时间和空间，细节将会在2.3节讨论。
+
+可以像使用其他类型一样使用实例化的类模板实例。
+
+```c++
+void foo(const Stack<int>& s){
+    using IntStack = Stack<int>;
+    Stack<int> istack[10]; // istack is array of 10 int statcks
+    IntStack istack2[10]; // istack2 is also an array of 10 int stacks
+}
+```
+
+#### 2.3 部分使用Stack类模板
+
+翻译的版本看不懂，实际上就是模板的实例化仅在使用的时候进行。比如在类成员函数中对模板参数T使用了`<<`运算符。如果自己实例化的T不支持该操作符，那么只要不使用这个成员函数就不会报错。如：
+
+```c++
+template<typename T>
+class Stack{
+public:
+      void printOn(std::ostream& strm) const{
+        for(const T& elem:elems_){
+            strm << elem << ' ';
+        }
+    }  
+};
+
+Stack<std::pair<int,int>> pair_stack;//ok
+pair_stack.printOn(std::cout);//error
+```
+
+##### 2.3.1 概念
+
+“概念”通常用来表示模板库中需要的约束。C++17中，概念只能通过文字进行表达（如代码注释）。这可能导致一个严重的问题，因为不遵守约束可能会导致大量的错误消息。
+
+C++20开始，将概念定义和验证变为了语言特性。
+
+在这之前，C++11之后，可以通过`static_assert`和预定义类型特征来检查约束、如：
+
+```c++
+//C++11
+template<typename T>
+class C{
+    static_assert(std::is_default_constructible<T>::value,
+                  "Class C requires default-constructible elements");
+};
+//C++14
+template<typename T>
+class C{
+        static_assert(std::is_default_constructible_v<T>,
+    "Class C requires default-constructible elements");
+};
+```
+
+但是，这样的错误输出往往是令人绝望的。
+
+#### 2.4 友元
+
+使用printOn()打印堆栈内容，需要为堆栈实现<<操作符。通常<<操作符实现为非成员函数，然后内联调用printOn();
+
+```c++
+template<typename T>
+class Stack{
+public:
+    void printOn(std::ostream& strm) const{
+      ...
+    }  
+    friend std::ostream& operator<<(std::ostream& strm,const Stack<T>& s){
+        s.printOn(strm);
+        return strm;
+    }
+};
+```
+
+这意味着用于类`Stack<>`的操作符<<不是一个函数模板，而是在需要时用类模板实例化的“普通”函数。（即模板实体，参见12.1节）
+
+然而，当我们想要声明一个友元函数，并在之后定义该函数，事情就会变的复杂。这里有两种选择：
+
+1.隐式声明一个新的函数模板，但要使用不同的模板参数，比如U：
+
+```c++
+template<typename T>
+class Stack{
+    ...
+     //这里使用T会编译报错declaration of template parameter ‘T’ shadows template parameter
+    template<typename U>
+    friend std::ostream& operator<<(std::ostream& strm,const Stack<U>& s);
+};
+```
+
+不管再次使用T或者跳过模板参数声明都没有用（包括内部T隐藏外部T或者在命名空间声明一个非模板函数）。
+
+2.将`Stack<T>`的输出操作符前向声明（意味着我们要首先前向声明`Stack<T>`）
+
+```c++
+template<typename T>
+class Stack;
+template<typename T>
+std::ostream& operator<< (std::ostream&,const Stack<T>&);
+
+template<typename T>
+class Stack{
+    ...
+     //注意 <T> 如果缺失<T>，编辑器会警告这里是一个非模板函数
+    friend std::ostream& operator<< <T>(std::ostream& strm,const Stack<T>& s);
+};
+```
+
+需要注意函数名后面的`<T>`，通过这个标识我们声明了一个非成员模板函数的特化作为友元。若没有`<T>`,我们将会声明一个新的非模板函数。12.5.2小节将会有更多的细节。
+
+#### 2.5 类模板的特化
+
+你可以使用模板参数特化类模板。和重载函数模板一样（参见1.5节），类模板特化允许你对于特定类型的实现进行优化或者修正特定类型的类模板特化实例的行为。然而，如果你特化了一个类模板，就必须特化所有的成员函数。尽管你可以特化类模板的某个成员函数，但是如果你这么做了，你就不能再特化该成员函数所属的所有类模板实例了。
+
+如果要特化一个类模板，需要在声明类时以`template<>`开头并标明特化类模板的类型。这些类型被用作模板参数并且必须紧跟在类名的后面：
+
+```c++
+template<>
+class Stack<std::string>{
+  ...  
+};
+```
+
+对于特化来说，所有的成员函数都要按照“普通”函数来定义，即将所有`T`替换为特化的类型：
+
+```c++
+void Stack<std::string>::push(const std::string& elem){
+    elems_.push_back(elem);
+}
+```
+
+完整`Stack<>`对于`std::string`的特化示例：
+
+```c++
+#include "stack.hpp" //注意，特化可以作为.cc文件
+template<>
+class Stack<std::string>{
+private:
+    std::deque<std::string> elems_;
+public:
+    void push(const std::string&);
+    void pop();
+    const std::string& top() const;
+    bool empty() const{
+        return elems_.empty();
+    }
+};
+
+void Stack<std::string>::push(const std::string& elem){
+    elems_.push_back(elem);
+}
+
+void Stack<std::string>::pop(){
+    assert(!elems_.empty());
+    elems_.pop_back();
+}
+
+const std::string& Stack<std::string>::top() const{
+    assert(!elems_.empty());
+    return elems_.back();
+}
+```
+
+该实例中，该特化使用引用语义将字符串传递给push()，对于该类型更加合适（更好的做法是使用转发引用（forwarding reference,这里是转发，而非前向，指的是`std::forward`，这些内容将在6.1节讨论））。
+
+另一个不同是使用了`deque`而非`vector`在类中管理数据。尽管在这没什么实际用处，但是表明了特化类模板的实现可能和主要模板的实现看起来非常不同。
+
+#### 2.6 偏特化
+
+类模板可以进行片特化。可以在特定情况下提供特殊的实现，但是有些模板参数仍然需要用户（接口使用者）来定义。举例来说，我们可以为指针定义一个特殊的`Stack<>`类实现：
+
+```c++
+#include "stack1.hpp"
+template<typename T>
+class Stack<T*>{
+private:
+    std::vector<T*> elems_;
+public:
+    void push(T*);
+    T* pop();
+    T* top() const;
+    bool empty() const{
+        return elems_.empty();
+    }
+};
+
+template<typename T>
+void Stack<T*>::push(T* elem){
+    elems_.push_back(elem);
+}
+
+template<typename T>
+T* Stack<T*>::pop(){
+    assert(!elems_.empty());
+    T* p = elems_.back();
+    elems_.pop_back();
+    return p;
+}
+
+template<typename T>
+T* Stack<T*>::top() const{
+    assert(!elems_.empty());
+    return elems_.back();
+}
+```
+
+通过
+
+```c++
+template<typename T>
+class Stack<T*>{};
+```
+
+我们定义了一个类模板，仍然使用T为参数，但是为指针类型进行了特化(`Stack<T*>`)。
+
+再次提醒，特化可能会提供一份（轻微）不同的接口。该实例中的`pop()`返回的是一个已经存储的指针，因此类模板的用户如果使用new来创建指针时，可以通过delete来删除这个指针：
+
+```c++
+Stack<int*> prt_stack;
+ptr_stack.push(new int{42});
+std::cout << *prt_stack.top() << '\n';
+delete ptr_stack.pop();
+```
+
+**多参数的偏特化**
+
+类模板可能也会特化多个模板参数之间的关系。举例来说，对于下述的类模板：
+
+```c++
+template<typename T1,typename T2>
+class MyClass{
+    ...
+};
+```
+
+下述的偏特化是可能的：
+
+```c++
+//偏特化：所有模板参数都是相同类型
+template<typename T>
+class MyClass<T,T>{};
+
+//偏特化：第二个类型为int
+template<typename T>
+class MyClass<T,int>{};
+
+//偏特化，两个模板参数都是指针类型
+template<typename T1,typename T2>
+class MyClass<T1*,T2*>{};
+```
+
+下面指明了每个实例中模板与定义的对应关系：
+
+```c++
+MyClass<int,float> mif; 	// MyClass<T1,T2>
+MyClass<float,float> mff;	// MyClass<T,T>
+MyClass<float,int> mfi;		// MyClass<T,int>
+MyClass<int*,float*> mp;	// MyClass<T1*,T2*>
+```
+
+如果有多个匹配的偏特化实例，将会提示模糊定义:
+
+```c++
+MyClass<int,int> m;	//error:MyClass<T,T> or MyClass<T,int> ?
+MyClass<int*,int*> m;//error:MyClass<T,T> or MyClass<T1*,T2*> ?
+```
+
+为了解决第二个问题，可以为相同类型的指针提供一个偏特化：
+
+```c++
+template<typename T>
+class MyClass<T*,T*>{};
+```
+
+偏特化的细节，参见16.4节
+
+#### 2.7 默认类模板参数
+
