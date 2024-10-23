@@ -1705,3 +1705,101 @@ publiser_->set_qos(publisher_qos);
 </data_reader>
 ```
 
+##### 3.1.2.1.7 历史策略(HistoryQosPolicy)
+
+该策略控制在成功和已经存在的DataReader实体进行通信前实例的数据发生了一次或多次变化时系统的行为。
+
+策略的数据成员：
+
+| 数据成员名 | 类型                 | 默认值                  |
+| ---------- | -------------------- | ----------------------- |
+| `kind`     | HistoryQosPolicyKind | `KEEP_LAST_HISTORY_QOS` |
+| `depth`    | `int32_t`            | 1                       |
+
++ `kind`：控制服务是否仅发送最近的值，所有的中间值还是在中和举措。参考HistoryQosPolicyKind获取更多细节
++ `depth`：控制历史中样本可存储的最大数量。仅当类型被设置为`KEEP_LAST_HISTORY_QOS`时以及和*资源限制策略*(ResourceLimitsQosPolicy)一致（这意味着该值必须小于等于max_samples_per_instance）时才有效。
+
+> 提示：
+>
+> 该策略适用于Topic、DataWriter以及DataReader实体
+>
+> 该策略**不**能在已激活的实体上改变
+
+**历史策略类型（HistoryQosPolicyKind）**
+
+两个可能的值：
+
++ `KEEP_LAST_HISTORY_QOS`：该服务将只保存实例最近的值而忽略旧值。可以保存和发送的最大样本数量由*历史策略*（HistoryQosPolicy）的`depth`定义（`depth`必须和*资源限制策略*（ResourceLimitsQosPolicy）一致）。如果达到了`depth`定义的限制，系统会丢弃最旧的数据来存储新的数据。
++ `KEEP_ALL_HISTORY_QOS`：该服务会在可以发送给所有现存的Subscriber之前尝试存储实例的所有值。如果选择了该选项，`depth`就没有任何作用，*历史*（History）的仅被*资源限制策略*（ResourceLimitsQosPolicy）所限制。
+
+**一致性原则（Consistency rule）**
+
+HistoryQos必须和*资源限制策略*（ResourceLimitsQosPolicy）、*持久策略*（DurabilityQosPolicy）以及*可靠性策略*（ReliabilityQosPolicy）设置一致。所以有以下情形需要考虑：
+
++ `depth`仅在`kind`被设置为`KEEP_LAST_HISTORY_QOS`时需要考虑
+
++ `depth`必须和*资源限制策略*(ResourceLimitsQosPolicy)一致（这意味着该值必须小于等于max_samples_per_instance）。同样的，`max_samples`必须大于等于`max_samples_per_instance`和`max_instances`的乘积。
+
++ `depth`不能小于或等于0。如果需要设置无限制的`depth`，请考虑将`kind`设置为`KEEP_ALL_HISTORY_QOS`。
+
++ 将`kind`设置为`KEEP_ALL_HISTORY_QOS`需要*资源限制策略*（ResourceQosPolicy）设置了限制(`max_samples_per_instance`比`max_samples`早)
+
++ 当*可靠性策略*（ReliabilityQosPolicy）的`ReliabilityQosPolicyKind`被设置为`RELIABLE_RELIBILITY_QOS`，*历史策略*的`kind`被设置为`KEEP_ALL_HISTORY_QOS`时，如果到达了资源限制，服务的行为取决于*持久策略*（DurabilityQosPolicy）：
+
+  + 如果*持久策略*（DurabilityQosPolicy）的`kind`被设置为`VOLATILE_DURABILITY_QOS`，DataWriter的`write()`调用将会忽略历史中的最旧样本。请注意，已删除的示例可能属于与新写入的示例不同的实例。
+  + 如果*持久策略*（DurabilityQosPolicy）的`kind`被设置为`TRANSIENT_LOCAL_DURABILITY_QOS`或者`TRANSIENT_DURABILITY_QOS`，DataWriter的`write()`调用将会阻塞，直到历史中有存储新样本的空间
+
+  **示例**
+
+  ```c++
+  //该实例使用DataWriter，但是也同样适用于DataReader和Topic实体
+  DataWriterQos writer_qos;
+  // HistoryQosPolicy默认使用kind = KEEP_LAST并且depth = 1 构造
+  // 可以调整depth并将kind保持为KEEP_LAST
+  writer_qos.history().depth = 20;
+  // 或者将kind设置为KEEP_ALL（depth就没用了）
+  writer_qos.history().kind = KEEP_ALL_HISTORY_QOS;
+  // 使用修改过的策略创建对应的实体
+  writer_ =  publisher_->create_datawriter(topic_,writer_qos);
+  ```
+
+  ```xml
+  <topic>
+      <historyQos>
+          <kind>KEEP_LAST</kind> <!-- string -->
+          <depth>20</depth> <!-- uint32 -->
+      </historyQos>
+  </topic>
+  ```
+
+##### 3.1.2.1.8 延迟预算策略（LatencyBudgetQosPolicy）
+
+  > 注意：
+  >
+  > 该策略将在未来版本中实现
+
+  该策略指明数据从写入到插入DataReader的历史（History）中并发出通知的最大可接受延迟。为了优化内部行为，延迟默认设置0
+
+  策略的数据成员：
+
+  | 数据成员名 | 类型         | 默认值       |
+  | ---------- | ------------ | ------------ |
+  | `duration` | `Duration_t` | `c_TimeZero` |
+
+  > 提示
+  >
+  > 该策略适用于Topic、DataWriter以及DataReader
+  >
+  > 该策略可以在已激活的实体上更改
+
+  > 警告
+  >
+  > 为了DataWriters和DataReaders匹配，必须遵守兼容性原则。
+
+  **兼容性原则（Compatibility Rule）**
+
+  为了保持DataReaders和DataWriters之间*延迟预算策略*（LatencyBudgetQosPolicy）的兼容性，DataWriter的延迟必须小于等于DataReader的延时（简言之就是读数据的时候一定要有已经写了的数据）。
+
+##### 3.1.2.1.9 寿命策略（LifespanQosPolicy）
+
+  

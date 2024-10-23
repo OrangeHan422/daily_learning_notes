@@ -645,6 +645,10 @@ class Stack{
 
 #### 2.5 类模板的特化
 
+> 橙子注：全特化是将模板类型指定为具体的类型，此时已经可以看做一个具体类
+>
+> 偏特化是对模板参数形式或者类型进行改变，仍旧存在模板参数。此时的偏特化模板类仍代表一个类族。
+
 你可以使用模板参数特化类模板。和重载函数模板一样（参见1.5节），类模板特化允许你对于特定类型的实现进行优化或者修正特定类型的类模板特化实例的行为。然而，如果你特化了一个类模板，就必须特化所有的成员函数。尽管你可以特化类模板的某个成员函数，但是如果你这么做了，你就不能再特化该成员函数所属的所有类模板实例了。
 
 如果要特化一个类模板，需要在声明类时以`template<>`开头并标明特化类模板的类型。这些类型被用作模板参数并且必须紧跟在类名的后面：
@@ -811,3 +815,401 @@ class MyClass<T*,T*>{};
 
 #### 2.7 默认类模板参数
 
+就像函数模板一样，你可以为类模板参数定义默认值。举例来说，在类`Stack<>`中，你可以将存储元素的容器作为第二个模板参数，并将`std::vector<>`设置为默认值：
+
+```c++
+template<typename T, typename Cont = std::vector<T>>
+class Stack{
+private:
+    Cont elems_;
+
+public:
+    void push(const T& elem);
+    void pop();
+    const T& top() const;
+    bool empty() const{
+        return elems_.empty();
+    }
+};
+
+template<typename T,typename Cont>
+void Stack<T,Cont>::push(const T& elem){
+    elems_.push_back(elem);
+}
+
+template<typename T,typename Cont>
+void Stack<T,Cont>::pop(){
+    assert(!elems_.empty());
+    elems_.pop_back();
+}
+
+template<typename T,typename Cont>
+const T& Stack<T,Cont>::top() const{
+    assert(!elems_.empty());
+    return elems_.back(); // return copy of last element
+}
+```
+
+需要注意现在我们有两个模板参数，所以每个成员函数定义必须带上这两个参数进行定义：
+
+```c++
+template<typename T, typename Cont>
+void Stack<T,Cont>::push(const T& elem){
+    elems_.push_back(elem);
+}
+```
+
+你可以像以前一样使用这个自定义stack类。因为如果你只传递了一个参数作为元素类型，`vector`会用来管理这些元素：
+
+```c++
+template<typename T,typename Cont = std::vector<T>>
+class Stack{
+    private:
+    	Cont elems_;
+...  
+};
+```
+
+当然，你也可以在你的程序中声明一个`Stack`对象时，指定一个元素容器
+
+```c++
+int main() {
+    Stack<int> intStack; // stack of ints
+
+    //stack of doubles using a std::deque<> to manage the elements
+    Stack<double,std::deque<double>> dblStack;
+
+    //manipulate int stack
+    intStack.push(7);
+    std::cout << intStack.top() << '\n';
+    intStack.pop();
+
+    //manipulate double stack
+    dblStack.push(42.42);
+    std::cout << dblStack.top() << '\n';
+    dblStack.pop();
+    return 0;
+}
+```
+
+通过
+
+```c++
+Stack<double,std::deque<double>>
+```
+
+你声明了一个使用`std::deque<>`来管理元素的栈，栈中的数据类型为double。
+
+#### 2.8 类型别名
+
+你可以通过为整个类型取一个新名字来更方便的使用类模板
+
+*类型定义*(typedefs)和*别名声明*(alias declarations)
+
+有两种方式为一个完整类型定义一个新名称：
+
+1. 使用关键词`typedef`：
+
+   ```c++
+   typedef Stack<int> IntStack;	//typedef
+   void foo(const IntStack& s);	//s is stack of ints
+   IntStack istack[10]; 			//istack is array of 10 stacks of ints
+   ```
+
+   我们将这种方式称为*类型定义*(typedef)，生成的名称为*类型定义名*（typename-name）。
+
+2. C++11后，使用关键词`using`:
+
+   ```c++
+   using IntStack = Stack<int>;	//alias declaration 别名声明
+   void foo(const IntStack& s);	//s is stack of ints
+   IntStack istack[10]; 			//istack is array of 10 stacks of ints
+   ```
+   由 *DosReisMarcusAliasTemplate*引入，称为别名声明
+
+需要注意，两种方法种，我们都只为已存在的类型定义了一个新名称，而非定义了一个新类型。因此，在类型定义：
+
+```c++
+typedef Stack<int> IntStack;
+```
+
+或
+
+```c++
+using IntStack = Stack<int>;
+```
+
+之后，`IntStack`和`Stack<int>`是相同类型的两个通用符号。
+
+对两种为现有类型定义新名称的方式，有一个通用术语*类型别名声明*(type alias declaration)。新名称就称之为*类型别名*(type alias)
+
+由于可读性更好（总是将被定义的类型名称放在等号左边），所以本书的后续章节，都更倾向于使用别名声明的语法（即`using`关键字。橙子注：在《EffectiveMordernC++》还是《ProfessionalC++V5》中好像提及了`typedef`好像会带来隐患，而`using`似乎会有多一层的检查来杜绝这种隐患）
+
+**模板别名(alias templates)**
+
+不同于`typedef`，别名声明可以为一个模板（即一个类型族）提供一个便利的名字。这也是从C++11开始支持的，称为模板别名(alias templates)。
+
+下例中将元素类型T参数化，并展开为一个在`std::deque`中存储元素的栈的模板别名为DequeStack：
+
+```c++
+template<typename T>
+using DequeStack = Stack<T,std::deuqe<T>>;
+```
+
+因此，类模板和模板别名都可以用来作为一个参数化类型。再次提醒，模板别名只是给现存类型定义一个新名字，显存类型仍然可以被使用。`DequeStack<int>`和`Stack<int,std::deque<int>>`都代表同一类型。
+
+再次提醒，一般来说，模板只能声明并定义在全局/命名空间范围内或者在类声明内。
+
+**成员类型的模板别名(Alias Templates for Member Types)**
+
+模板别名对于为模板类成员定义别名来说十分方便。
+
+通过如下方式为类成员定义模板别名后，
+
+```c++
+struct C{
+  typedef ... iterator;  
+};
+//or
+struct MyType{
+  using iterator = ...;  
+};
+```
+
+我们就可以更方便的声明一个模板类的成员：
+
+```c++
+template<typename T>
+using MyTypeIterator = typename MyType<T>::iterator;
+
+MyTypeIterator<int> pos;
+```
+
+否则，我们就要这样写：
+
+```c++
+typename MyType<T>::iterator pos;
+```
+
+**类型特征中的后缀`_t`**
+
+从C++14以后，标准库使用该技术对所有会生成一个类型的类型特征定义别名。举例来说，以后可以这么写：
+
+```c++
+std::add_const_t<T> //since C++14
+```
+
+来替换这种写法：
+
+```c++
+typename std::add_const<T>::type //since C++11
+```
+
+标准库中的定义：
+
+```c++
+namespace std{
+    template<typename T>
+    using add_const_t = typename add_const<T>::type;
+}
+```
+
+#### 2.9 类模板的参数推导
+
+在C++17之前，除非设置了默认的模板参数，否则你需要将所有的模板参数类型传递给类模板。到了C++17，这个限制被放松了。如果构造函数可以推导所有模板参数(没有默认值的)，你就可以跳过显式定义模板参数。
+
+举个例子，在前面所有的代码示例中，你可以不指定模板参数使用拷贝构造函数：
+
+```C++
+Stack<int> intStack1;
+Stack<int> intStack2 = intStack1; // OK in all versions
+Stack intStack3 = intStack1;	  // OK since C++17
+```
+
+通过提供需要初始化参数的构造函数，你可以使自定义的stack类支持元素类型推导。举例说明，我们可以提供一个可以由单一元素初始化的的stack：
+
+```c++
+template<typename T>
+class Stack{
+  private:
+    std::vector<T> elems_;
+  public:
+    Stack() = default;
+    Stack(const T& elem) // initialize stack with one element
+        :elems_({elem}){}
+    ...
+};
+```
+
+这样就可以以如下方式声明一个stack
+
+```c++
+Stack intStack = 0; // Stack<int> deduced since C++17
+```
+
+通过整型数0来初始化一个stack，模板参数T被推导为int，这样就实例化了一个`Stack<int>`
+
+注意事项：
+
++ 因为定义了带有参数int的构造函数，你需要显式声明默认构造函数为默认（即通过default设置默认构造函数，形式如下）。因为默认构造函数只在没有定义其他构造函数的时候有效。（橙子注：简言之就是，如果用户定义了构造函数，编译器就不会自动生成默认构造函数，如果想要该类有默认构造函数的行为，需要显式指定）
+
+  ```c++
+  Stack() = default;
+  ```
+
++ elem参数作为唯一元素使用大括号`{}`括起来，作为一个*初始化列表*(initializer list)来初始化vector类型的`elems_`：
+
+  ```c++
+  :elems_({elem})
+  ```
+
+  vector没有任何构造函数可以直接使用一个元素进行构造。(注意：`vector<int>{5}`构造的是一个长度为5的数组)
+
+需要注意，和函数模板不同，类模板参数不能只进行部分推导（通过显式声明了部分模板参数）。细节将在15.12讨论
+
+**通过字符串常量(String Literals)进行类模板参数推导**
+
+原则上，你也可以通过字符串常量初始化栈：
+
+```c++
+Stack string_stack = "bottom"; // Stack<const char[7]> deduced since C++17
+```
+
+但是这会导致很多问题：一般而言，当以引用形式传递一个模板类型T（橙子注：这里当以引用传递指的是前文中自定义的单个参数的构造函数`Stack(const T& elem)`），参数并不会*衰减*(decay，术语，表示将一个原生数组转换为一个指针类型)。这就意味着我们实际的初始化为:
+
+```c++
+Stack<const char[7]>
+```
+
+并在任何使用T的地方使用const char[7]类型。举例来说，我们不能push不同大小的字符串，因为它们的类型不同(we may not push a string of different size,because it has a different type)。更多细节参见7.4节。
+
+然而，当按值传递一个模板类型T，参数会*衰减*(decay，术语，表示将一个原生数组转换为一个指针类型)。这就意味着，构造函数将参数T推导成了const char*，所以整个类被推导成了`Stack<const char*>`
+
+正因如此，将构造函数声明为按值传递是有价值的：
+
+```c++
+template<typename T>
+class Stack{
+  private:
+    std::vector<T> elems_;
+  public:
+    Stack(T elem)
+        :elems_({elem})
+    {}
+};
+```
+
+这样，下述的初始化就可以正常工作：
+
+```c++
+Stack string_stack = "bottom";	//Stack<const char*> deduced since C++17
+```
+
+此时，为了避免多余的拷贝操作，我们应该使用移动操作：
+
+```c++
+template<typename T>
+class Stack{
+  private:
+    std::vector<T> elems_;
+  public:
+    Stack(T elem)
+        :elems_({std::move(elem)})
+    {}
+};
+```
+
+**推导指引**
+
+除了将构造函数声明为按值传递，还有另一个解决方法：因为将裸指针存储在容器中进行操作会造成诸多问题，我们应该禁止为容器类自动推导原生字符指针。
+
+你可以定义指定的*推导指引(deduction guides)来为类模板推导提供附加选择或者修正类模板推导的行为。举例来说，你可以定义推导指引，不管是字符常量还是C风格字符串，stack都实例化为`std::string`:
+
+```c++
+Stack(const char*) -> Stack<std::string>;
+```
+
+该指引应该和类定义出现在同一作用域（或命名空间）。一般来讲，该指引跟在类定义后面。我们将跟在推导指引`->`后面的类型称之为*指引类型*(guided type)
+
+现在，下述声明将会推导为`Stack<std::string`。
+
+```c++
+Stack string_stack{"bottom"}; // OK:Stack<std::string> deduced since C++17
+```
+
+然而，下述形式依旧不能推导为`Stack<std::string>`
+
+```c++
+Stack string_stack = "bottom"; //Stack<std::string> deduced,but still not valid
+```
+
+原因如下，我们推导为`std::string`就相当于实例化了一个`Stack<std::string>`:
+
+```c++
+class Stack{
+    private:
+    	std::vector<std::string> elems_;
+    public:
+    	Stack(const std::string& elem)
+            :elems_({elem}){}
+};
+```
+
+但是，根据语言规则，不能将字符串常量传递给以`std::string`为参数的构造函数来拷贝初始化（使用`=`来初始化）一个对象。所以必须使用`{}`来初始化stack：
+
+```c++
+Stack string_stack{"bottom"}; //Stack<std::string>deduced and valid
+```
+
+以防有疑问，类模板参数推导也会复制。在将string_stack声明为`Stack<std::string>`后，下述的初始化为相同类型（调用了拷贝构造），而不是通过将string stack作为元素进行初始化。
+
+```c++
+Stack stack2{string_stack};		//Stack<std::string> deduced
+Stack stack3(string_stack);		//Stack<std::string> deduced
+Stack stack4 = {string_stack};	//Stack<std::string> deduced
+```
+
+类模板参数推导细节在15.12小节
+
+#### 2.10 模板聚合
+
+聚合类也可以作为模板。（聚合类：没有用户定义的，显式的或者继承的构造函数；没有私有或保护的非静态数据成员；没有虚函数；没有虚基类、私有基类或者保护基类的类或者结构体）。举个例子：
+
+```c++
+template<typename T>
+struct ValueWithComment{
+    T value;
+    std::string comment;
+};
+```
+
+该结构体定义了参数化了value类型的聚合类。你可以想其他任何类模板一样声明对象，并且继续以聚合的方式使用:
+
+```c++
+ValueWithComment<int> vc;
+vc.value = 42;
+vc.comment = "initial value";
+```
+
+从C++17开始，对于聚合类模板，也可以定义推导指引：
+
+```C++
+ValueWithComment(const char*,const char*) -> ValueWithComment<std::string>;
+ValueWithComment vc2 = {"hello","initial value"};
+```
+
+如果没有推导指引，这种初始化是不可能的，因为ValueWithComment没有提供构造函数来帮助推导。
+
+标准库中的`std::array<>`也是一个聚合类，参数化了元素类型和大小。C++17也为其定义了推导指引，将在4.4.4节讨论。
+
+#### 2.11 总结
+
++ 类模板是一个或者多个类型参数待定的类
++ 使用类模板，需要将类型作为模板参数传递。类模板就会为这些类型实例化并编译
++ 对于类模板，只有被调用的成员函数才会被实例化
++ 可以为类模板指定具体的类型（全特化）
++ 可以使用指定类型对类模板进行偏特化
++ 从C++17开始，类模板参数可以从构造函数中自动推导
++ 可以定义聚合类模板
++ 按值传递的模板类型将会衰退
++ 模板只能在全局、命名空间或者类定义内部进行声明。

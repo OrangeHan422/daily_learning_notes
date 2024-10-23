@@ -1477,3 +1477,94 @@ stackcount -h
 
 ### 4.7 trace
 
+trace(8)是一个BCC多用途工具，可以针对多个数据源进行每个事件的跟踪，支持kprobes、uprobes、跟踪点和USDT探针。
+
+它可以用来回答以下问题：
+
++ 当某个内核态/用户态函数被调用时，调用参数是什么？
++ 这个函数的返回值是什么？调用失败了吗？
++ 这个函数是如何被调用的？相应的用户态或内核态函数调用栈是什么？
+
+因为trace(8)会对每个事件产生一行输出，因此比较适合适用于低频事件。如果是诸如网络收发包、上下文切换以及内存分配等事件，每秒可能会发生高达百万次输出，这样会造成非常显著的额外开销。一种减少开销的方式是使用一个过滤表达式，只打印感兴趣的事件。高频发生的事件，更适合使用其他在内核中直接进行汇总统计的工具，如funccount(8)、stackcount(8)和argdist(8)。
+
+#### 4.7.1 trace的示例
+
+以下示例通过跟踪内核函数`do_sys_open()`来展示文件打开动作，相当于trace(8)版本的opensnoop(8):
+
+![image-20241023093452788](./images/image-20241023093452788.png)
+
+arg2是do_sys_open()函数的第2个参数，代表打开的文件名字，其类型是char*。输出结果最后一列的标签是"-"，是提供给trace(8)的格式化字符串。
+
+#### 4.7.2 trace的语法
+
+trace(8)的命令行参数包括可以用来改变行为的选项，以及一个或者多个探针（probe）：
+
+```shell
+trace [option] probe [probe ...]
+```
+
+probe的语法是：
+
+```shell
+eventname(signature) (boolean filter) "format string", arguments
+```
+
+signature不是必需的，仅在特定情形下需要（参看4.7.4节）。过滤条件(filter)也非必需，支持使用布尔操作符：==、<、>和!=。format string和arguments也非必需，就算没有，trace(8)也可以为每个事件打印一行，只是不会包含定制的输出字段
+
+eventname的语法和funccount(8)类似，不过增加了对返回值的支持。
+
++ `name`或者`p:name`：对内核函数`name()`进行插桩(p means probe?)
++ `r::name`：对内核函数`name()`的返回值进行插桩。
++ `lib:name` 或者 `p:lib:name`：对用户态lib库中的函数`name()`进行插桩
++ `r:lib:name`或者`p:lib:name`：对用户态lib库的函数`name()`的返回值进行插桩
++ `path:name`：对位于path路径下文件中的用户态函数`name()`进行插桩
++ `r:path:name`：对位于path路径下文件中的用户态函数`name()`的返回值进行插桩
++ `t:system:name`：对名为`system:name`的内核跟踪点进行插桩(t means tracepoint?)
++ `u:lib:name`：对lib库中名为`name`的USDT探针进行插桩
++ `*`：通配符。`-r`选项允许使用正则表达式
+
+格式字符串基于printf()实现，支持的参数与其大体相同
+
+总的语法和编程语言类似。如下面的trace(8)单行程序：
+
+```shell
+trace 'c:open (arg2 == 42) "%s %d", arg1, arg2'
+```
+
+等价的类C语法为（仅作说明，trace(8)并不能这样执行）：
+
+```shell
+trace 'c:open {if (arg2 == 43) {printf("%s %d\n", arg1, arg2); } }'
+```
+
+在临时的跟踪分析中经常会需要定制化打印一个事件的参数，所以trace(8)是一个可随时启动的方便工具。
+
+#### 4.7.3 trace的单行程序
+
+列举一些帮助消息没有的单行程序。
+
+跟踪内核函数do_sys_open()，并打印文件名：
+
+```shell
+trace 'do_sys_open "%s", arg2'
+```
+
+跟踪内核函数do_sys_open()，并打印返回值：
+
+```shell
+trace 'r::do_sys_open "ret: %d", retval'
+```
+
+跟踪do_nanosleep()，并打印用户态调用栈：
+
+```shell
+trace -U 'do_nanosleep "mode: %d", arg2'
+```
+
+跟踪通过pam库进行身份鉴别的请求：
+
+```shell
+trace 'pam:pam_start "%s: %s", arg1, arg2'
+```
+
+#### 4.7.4 trace的结构体
