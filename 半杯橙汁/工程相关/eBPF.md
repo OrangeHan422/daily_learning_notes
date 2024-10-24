@@ -1648,3 +1648,66 @@ expr是要汇总统计的表达式。可以是一个函数或者一个跟踪点�
 filter是可选的布尔表达式，用来对事件进行过滤。支持`==`、`!=`、`<`和`>`。
 
 label是可选设置，用来为输出增加标签文本以达到内嵌文档的效果。
+
+#### 4.8.2 argdist的单行程序
+
+一些额外的示例。
+
+将内核函数`vfs_read()`的返回值以直方图的形式打印出来：
+
+```shell
+argdist -H 'r::vfs_read()'
+```
+
+以直方图方式对PID1005的进程的用户态调用libc的read()函数的返回值(size)进行统计并输出：
+
+```shell
+argdist -p 1005 -H 'r:c:read()'
+```
+
+根据调用号(syscall ID)对系统调用进行计数，这里使用了`raw_syscall:sysenter`这个跟踪点：
+
+```shell
+argdist -C 't:raw_syscalls:sys_enter():int:args->id'
+```
+
+对tcp_sendmsg()的参数size进行统计：
+
+```shell
+argdist -C 'p::tcp_sendmsg(struct sock *sk,struct msghdr *msg,size_t size):u32:size'
+```
+
+对tcp_sendmsg()的size作为以2的幂为区间的直方图打印出来：
+
+```shell
+argdist -H 'p::tcp_sendmsg(struct sock *sk,struct msghdr *msg,size_t size):u32:size'
+```
+
+将PID为181的进程按照文件描述符对writer()调用进行计数：
+
+```shell
+argdist -p 181 -C 'p:c:write(int fd):int:fd'
+```
+
+打印延迟大于0.1毫秒的进程读操作：
+
+```shell
+argdist -C 'r::__vfs_read():u32:$PID:$latency > 100000'
+```
+
+#### 4.8.3 argdist的帮助信息
+
+```shell
+argdist -h
+```
+
+### 4.10 开发BCC工具
+
+本书在工具开发方面侧重于bpftrace，仅将BCC作为一个现成工具的仓库。附录C中会介绍BCC工具开发。
+
+BCC更适合创建复杂、带有各种命令行参数、完全可定制的输出和动作的工具。相比之下，bpftrace更适合用于编写单行程序，或者不接受命令行参数/单个参数，只打印文本输出。
+
+BCC支持使用C语言编写底层BPF控制程序，然后使用Python或者其他支持的语言编写用户态组件。但是BCC的开发耗时以及代码量可能是bpftrace的10倍。
+
+### 4.11 BCC的内部实现
+
