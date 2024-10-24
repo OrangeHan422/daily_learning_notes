@@ -1802,4 +1802,181 @@ HistoryQos必须和*资源限制策略*（ResourceLimitsQosPolicy）、*持久�
 
 ##### 3.1.2.1.9 寿命策略（LifespanQosPolicy）
 
-  
+  每个DataWriter写入的数据样本都有一个与之关联的过期时间，超过该时间，数据将会从DataWriter和DataReader的瞬息或者持久信息缓存(transient and persistent information caches)中清除。
+
+默认的持续时间(duration)是无穷，意味着DataWriter写入的样本没有最大的有效时长（即，永久有效）。
+
+过期时间通过将持续时间(duration)和源时间戳(source timestamp)相加来计算，持续时间可以在应用程序通过`write_w_timestamp()`成员函数调用或者提供`write()`成员方法时自动计算。DataReader允许使用接收到的时间戳替换源时间戳。
+
+策略数据成员：
+
+| 数据成员名 | 类型         | 默认值           |
+| ---------- | ------------ | ---------------- |
+| `duration` | `Duration_t` | `c_TimeInfinite` |
+
+> 提示：
+>
+> 该策略使用于Topic，DataReader和DataWriter实体
+>
+> 该策略可以在已激活的实体上更改
+
+**示例**
+
+```c++
+//该实例使用DataWriter，但是也同样适用DataReader和Topic实体
+DataWriterQos writer_qos;
+//寿命策略默认设置持续时间为无穷
+//将持续时间更改为5s
+writer_qos.lifespan().duration = {5,0};
+//用修改过的策略创建对应的实体
+writer_ = publisher_->create_datawriter(topic_,writer_qos);
+```
+
+```xml
+<data_writer profile_name="writer_xml_conf_lifespan_profile">
+    <qos>
+        <lifespan>
+            <duration>
+                <sec>5</sec>
+            </duration>
+        </lifespan>
+    </qos>
+</data_writer>
+
+<data_reader profile_name="reader_xml_conf_lifespan_profile">
+    <qos>
+        <lifespan>
+            <duration>
+                <sec>5</sec>
+            </duration>
+        </lifespan>
+    </qos>
+</data_reader>
+```
+
+##### 3.1.2.1.10 存活策略（LivelinessQosPolicy）
+
+该策略是服务用来确认网络上的特定实体仍然存活的机制。有不同的设置允许区分定期更新数据的应用程序和偶尔更新数据的应用程序。也可以通过该活力策略定制哪些类型的失败需要被检测到。
+
+策略数据成员
+
+| 数据成员名            | 类型                    | 默认值                     |
+| --------------------- | ----------------------- | -------------------------- |
+| `kind`                | LivelinessQosPolicyKind | `AUTOMATIC_LIVELINESS_QOS` |
+| `lease_duration`      | `Duration_t`            | `c_TimeInfinite`           |
+| `announcement_period` | `Duration_t`            | `c_TimeInfinite`           |
+
++ `kind`：该数据成员确认服务是否需要自动断言其存活性(assert the liveliness automatically)或者服务是否需要等待发布方断言存活性。参考*存活策略类型*(LivelinessQosPolicyKind)获取更多细节
++ `lease_duration`：在DataWriter最后一次断言不再存活之后等待的时长。
++ `announcement_period`：DataWriter发送的连续存活消息之间的时长。该数据成员仅在类型设置为`AUTOMATIC_LIVELINESS_QOS`或者`MANUAL_BY_PARTICIPANT_LIVELINESS_QOS`时有效，并且需要比`lease_duration`小
+
+> 提示：
+>
+> 该策略适用于Topic，DataReader和DataWriter实体
+>
+> 该策略**不**能在已激活实体上进行更改。
+
+> 警告：
+>
+> 为了DataWriters和DataReaders匹配，必须遵守兼容性原则
+
+**存活策略类型(LivelinessQosPolicyKind)**
+
+三种可能的值：
+
++ `AUTOMATIC_LIVELINESS_QOS`：服务负责在指定的频率中续约(renewing the leases)，只要成员运行的本地进程仍在运行，并且和远程成员的连接还存在，那么远程成员的实体将被视为存活。该类型适用于那些只需要确定对端应用是否仍在运行的应用。
++ 两种手动模式要求发布方的应用程序在*租约时长*(lease_duration)定时器失效前，周期性的断言存活性。发布任何新数据都隐式断言其存活性，但是可以通过显式调用`assert_liveliness`成员函数完成断言。
+  + `MANUAL_BY_PARTICIPANT_LIVEINESS_QOS`：如果发布方的一个实体断言其存活性，服务会推断相同域成员的所有其他实体也都存活。
+  + `MANUAL_BY_TOPIC_LIVEINESS_QOS`：该模式更加严格，要求DataWriter里至少要有一个实例断言，才会认为该DataWriter存活。
+
+为了保持DataWriter和DataReader之间*存活策略*(LivelinessQosPolicy)的兼容性，DataWriter的类型必须大于等于DataReader类型。这些类型的大小顺序为:
+
+`AUTOMATIC_LIVELINESS_QOS`<`MANUAL_BY_PARTICIPANT_LIVEINESS_QOS`<`MANUAL_BY_TOPIC_LIVEINESS_QOS`
+
+可能的组合：
+
+| DataWriter类型                        | DataReader类型                        | 兼容性 |
+| ------------------------------------- | ------------------------------------- | ------ |
+| `AUTOMATIC_LIVELINESS_QOS`            | `AUTOMATIC_LIVELINESS_QOS`            | 是     |
+| `AUTOMATIC_LIVELINESS_QOS`            | `MANUAL_BY_PARTICIPANT_LIVEINESS_QOS` | 否     |
+| `AUTOMATIC_LIVELINESS_QOS`            | `MANUAL_BY_TOPIC_LIVEINESS_QOS`       | 否     |
+| `MANUAL_BY_PARTICIPANT_LIVEINESS_QOS` | `AUTOMATIC_LIVELINESS_QOS`            | 是     |
+| `MANUAL_BY_PARTICIPANT_LIVEINESS_QOS` | `MANUAL_BY_PARTICIPANT_LIVEINESS_QOS` | 是     |
+| `MANUAL_BY_PARTICIPANT_LIVEINESS_QOS` | `MANUAL_BY_TOPIC_LIVEINESS_QOS`       | 否     |
+| `MANUAL_BY_TOPIC_LIVEINESS_QOS`       | `AUTOMATIC_LIVELINESS_QOS`            | 是     |
+| `MANUAL_BY_TOPIC_LIVEINESS_QOS`       | `MANUAL_BY_PARTICIPANT_LIVEINESS_QOS` | 是     |
+| `MANUAL_BY_TOPIC_LIVEINESS_QOS`       | `MANUAL_BY_TOPIC_LIVEINESS_QOS`       | 是     |
+
+还有，DataWriter的`lease_duration`不能比DataReader的`lease_duration`大。
+
+**示例**
+
+```c++
+//该示例使用DataWriter，但是也同样适用于DataReader和Topic实体
+DataWriterQos writer_qos;
+//存活策略默认以AUTOMATIC类型构造
+//将类型改为MANUAL_BY_PARTICIPANT
+writer_qos.liveliness().kind = MANUAL_BY_PARTICIPANT_LIVEINESS_QOS;
+//默认租约时长为无穷
+//改为1s
+writer_qos.liveliness().lease_duration = {1,0};
+//默认声明周期为无穷
+//改为1ms
+writer_qos.liveliness().announcement_period = {0, 1000000};
+//通过修改过的策略创建对应的实体
+writer_ = publiser_->create_datawriter(topic_,writer_qos);
+```
+
+```xml
+<data_writer profile_name="writer_xml_conf_liveliness_profile">
+    <qos>
+        <liveliness>
+            <announcement_period>
+                <nanosec>1000000</nanosec>
+            </announcement_period>
+            <lease_duration>
+                <sec>1</sec>
+            </lease_duration>
+            <kind>AUTOMATIC</kind>
+        </liveliness>
+    </qos>
+</data_writer>
+
+<data_reader profile_name="reader_xml_conf_liveliness_profile">
+    <qos>
+        <liveliness>
+            <lease_duration>
+                <sec>1</sec>
+            </lease_duration>
+	    <kind>AUTOMATIC</kind>
+        </liveliness>
+    </qos>
+</data_reader>
+```
+
+##### 3.1.2.1.11 所有权策略（OwnershipQosPolicy）
+
+该策略指明多个DataWriter是否可以对同一数据的实例进行更新，如果可以，这写修改改如何决断。
+
+策略数据成员：
+
+| 数据成员名 | 类型                   | 默认值                 |
+| ---------- | ---------------------- | ---------------------- |
+| `kind`     | OwnershipQosPolicyKind | `SHARED_OWNERSHIP_QOS` |
+
+> 提示
+>
+> 该策略适用于Topic，DataReader和DataWriter实体
+>
+> 该策略**不**能在已激活实体上更改
+
+> 警告
+>
+> 为了DataWriter和DataReader匹配，必须遵守兼容性原则
+
+**所有权策略类型（OwnershipQosPolicyKind）**
+
+两种可能值：
+
++ `SHARED_OWNERSHIP_QOS`：该选项表明服务并不强制要求每个实例拥有唯一的所有权。这种情况下，对于同一数据实例，可以有多个DataWriter进行更新，并且所有更新对于现存的DataReader都是有效的。这些更新也受制于*基于时间过滤策略*（TimeBasedFilterQosPolicy）或者*历史策略*（HistoryQosPolicy）来进行过滤
++ `EXCLUSIVE_OWNERSHIP_QOS`：
