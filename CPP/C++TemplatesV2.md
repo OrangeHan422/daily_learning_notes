@@ -1213,3 +1213,458 @@ ValueWithComment vc2 = {"hello","initial value"};
 + 可以定义聚合类模板
 + 按值传递的模板类型将会衰退
 + 模板只能在全局、命名空间或者类定义内部进行声明。
+
+### 第三章：非类型模板参数
+
+对于函数和类模板，模板参数不必为类型。它们也可以是一般的值。和使用类型参数作为模板一样，你在代码使用之前为一些细节保留开放（橙子注：就是在没有使用之前，模板类型是不进行实例化的）。非类型模板参数也一样，只不过保持开放的是一个值而不是一个类型。当使用这种模板时，你需要显式指定这个值。之后对应的代码就会被实例化。该章节通过这种特性展示了一个新版本的stack类模板。另外，我们展示了一个非类型函数模板参数的示例并将讨论该技术的一些限制
+
+#### 3.1 非类型类模板参数
+
+和之前章节的stack实现对比，你可以通过一个固定长度的数组实现一个栈。这种方法的优点是，不管是来源于你或者标准容器的内存管理开销被避免了。然而，找到栈的最佳尺寸是一个挑战。你栈设定的越小，就越容易填满。你栈设定的越大，就会有越多不必要的内存被保留。一个较好的方法是让用户决定stack中的最大元素数量是多少。
+
+为了达到这个目的，可以将大小设置为一个模板参数：
+
+```c++
+template<typename T, std::size_t MaxSize>
+class Stack{
+private:
+    std::array<T,MaxSize> elems_;
+    std::size_t num_elems_;
+public:
+    Stack();
+    void push(const T& elem);
+    void pop();
+    const T& top() const;
+    bool empty() const{
+        return num_elems_ == 0;
+    }
+
+    std::size_t size() const{
+        return num_elems_;
+    }
+};
+template<typename T,std::size_t MaxSize>
+Stack<T,MaxSize>::Stack()
+:num_elems_(0){}
+
+
+template<typename T,std::size_t MaxSize>
+void Stack<T,MaxSize>::push(const T& elem){
+    assert(num_elems_ < MaxSize);
+    elems_[num_elems_] = elem;
+    ++num_elems_;
+}
+
+template<typename T,std::size_t MaxSize>
+void Stack<T,MaxSize>::pop(){
+    assert(!elems_.empty());
+    --num_elems_;
+}
+
+template<typename T,std::size_t MaxSize>
+const T& Stack<T,MaxSize>::top() const{
+    assert(!elems_.empty());
+    return elems_[num_elems_-1]; 
+}
+```
+
+第二个新的模板参数，`MaxSize`是一个整型。它指定了内部数组中栈元素的最大个数：
+
+```c++
+template<typename T,std::size_t MaxSize>
+class Stack{
+  private:
+    std::array<T,MaxSize> elems_;
+};
+```
+
+另外，在`push()`函数中检查了栈是否已满：
+
+```c++
+template<typename T,std::size_t MaxSize>
+void Stack<T,MaxSize>::push(const T& elem){
+    assert(num_elems_ < MaxSize);
+    elems_[num_elems_] = elem;
+    ++num_elems_;
+}
+```
+
+为了使用这个类模板，你需要指明元素类型和最大容量：
+
+```c++
+int main() {
+    Stack<int,20> int20Stack;   //stack of up to 20 ints
+    Stack<int,40> int40Stack;   //stack of up to 40 ints
+    Stack<std::string,40> stringStack;  //stack of up to 40 strings
+
+    //manipulate stack of up to 20 ints
+    int20Stack.push(7);
+    std::cout << int20Stack.top() << std::endl;
+    int20Stack.pop();
+
+    //manipulate stack of up to 40 strings
+    stringStack.push("hello");
+    std::cout << stringStack.top() << std::endl;
+    stringStack.pop();
+    return 0;
+}
+```
+
+需要注意，每个模板实例都是它自动的类型。因此，int20Stack和int40Stack是两个不同的类型，它们之间是没有隐式转换的。所以它们不能互相替换以及互相赋值。
+
+同样的，模板参数可以设置默认值：
+
+```c++
+template<typename = int,std::size_t MaxSize=100>
+class Stack{
+  ...  
+};
+```
+
+但是，从设计角度来看，这样做在该实例中并不合适。默认参数应该让使用者在使用时直观上看起来是正确的。但是不管是int类型还是最大值100对一个普通的stack类来说并不直观。因此，最好让用户在声明的时候将两个值都指定出来。
+
+#### 3.2 非类型函数模板参数
+
+你也可以为函数模板定义非类型参数。举个例子，下面的函数模板定义了一组可以累加指定值的函数：
+
+```c++
+template<int Val,typename T>
+T addValue(T x){
+    return x + Val;
+}
+```
+
+这种方法在函数或者操作别当做参数时十分有用。举例来说，在C++标准库中，你可以使用该函数实例来对一个集合的每个元素增加指定值：
+
+```c++
+std::transform(source.begin(),source.end(),
+              dest.begin(),
+              addValue<5,int>);
+```
+
+最后一个参数将`addValue<>()`实例化为将传递进来的int参数加5。source集合里的每个元素会调用对应的函数(即实例化的addValue)，并将结果放在dest集合中。
+
+需要注意，你需要为`addValue<>()`的模板参数T指定为int。推导仅在即时调用时有效，但是`std::transform()`的第四个参数需要一个完整的类型来推导。标准不支持对部分模板指定参数而对剩余的参数进行推导。
+
+同样，你也可以指定模板参数是由前面的参数推导出来的。举个例子，从传递进来的非类型参数派生出返回类型：
+
+```c++
+template<auto Val,typename T = decltype(Val)>
+T foo();
+```
+
+或者保证传递进来的值和传递进来的类型是相同的类型：
+
+```c++
+template<typename T,T Val = T{10}>
+T bar(T val){
+    return val + Val;
+}
+
+int main() {
+    int num = 10;
+    std::cout << bar<int>(num) << std::endl; //20
+    return 0;
+}
+```
+
+#### 3.3 非类型模板参数的限制
+
+需要注意非类型模板参数有一些限制。一般来说，只能是整型常量值（包括枚举），对象、函数、成员的指针，对象或者函数的左值引用，或者`std::nullptr_t`(`nullptr`的类型)。
+
+浮点类型和类对象是不允许作为非类型模板参数的：
+
+```c++
+template<double VAT>	//error
+double process(double v){
+    return v * VAT;
+}
+
+template<std::string name>	//error
+class MyClass{
+    ...
+};
+```
+
+在向模板参数传递指针或者引用时，对象不能是字符串常量，临时对象，或者数据成员和他的子类。因为在C++17之前，这些限制在逐步放宽，所以下述的限制也需注意：
+
++ C++11里，对象必须有外部链接（即，可以在另一个翻译单元中使用extern引用）
++ C++14中，对象补习有内部或者外部链接
+
+因此，下例是不可行的：
+
+```c++
+template<const char* name>
+class MyClass{
+    ...
+};
+
+MyClass<"hello"> x;	//error:string literal "hello" not allowed
+```
+
+但是也有变通方案（依赖于C++的版本）：
+
+```c++
+template<const char* name>
+class Message{
+public:
+    void display(){
+        std::cout << name << std::endl;
+    }
+};
+
+extern const char s03[] = "s03";
+const char s11[] = "s11";
+
+int main() {
+    Message<s03> m03; //ok for all versions
+    m03.display();
+
+    Message<s11> m11; // ok since C++11
+    m11.display();
+
+    static const char s17[] = "s17";//no linkage
+    Message<s17> m17;   // ok since C++17
+    m17.display();
+    return 0;
+}
+```
+
+三种场景下，常量字符串被当做一个声明为`const char*`的模板参数。如果该对象有外部链接，那么在所有C++版本中都合法(s03)；如果该对象有内部链接，那么在C++11、C++14中是合法的；如果该对象没有任何链接，那么从C++17开始都合法。
+
+更多细节将在12.3.3小节讨论，并在17.2小节讨论该领域将来可能发送的改变。
+
+**避免无效的表达式**
+
+非类型模板参数的实参可能是任何编译期表达式。举个例子：
+
+```c++
+template<int I,bool B>
+class C;
+...
+C<sizeof(int) + 4,sizeof(int) == 4> c;
+```
+
+然而，如果在表达式中使用了运算符`>`，你就必须将整个表达式括起来，保证配对的`>`作为结尾：
+
+```c++
+C<42, sizeof(int) > 4> c;	//error:first > ends the template argument
+C<42, (sizeof(int) > 4)> c;	//ok
+```
+
+#### 3.4 模板参数类型auto
+
+从C++17开始，你可以定义一个非类型模板参数来接收任何被允许的非类型参数。通过该特性，我们可以提供一个更泛化的有固定长度的stack类：
+
+```c++
+template<typename T, auto MaxSize>
+class Stack{
+public:
+    using size_type = decltype(MaxSize);
+private:
+    std::array<T,MaxSize> elems_;
+    size_type num_elems_;
+public:
+    Stack();
+    void push(const T& elem);
+    void pop();
+    const T& top() const;
+    bool empty() const{
+        return num_elems_ == 0;
+    }
+
+    size_type size() const{
+        return num_elems_;
+    }
+};
+
+
+template<typename T, auto MaxSize>
+Stack<T,MaxSize>::Stack()
+:num_elems_(0){}
+
+
+template<typename T, auto MaxSize>
+void Stack<T,MaxSize>::push(const T& elem){
+    assert(num_elems_ < MaxSize);
+    elems_[num_elems_] = elem;
+    ++num_elems_;
+}
+
+template<typename T, auto MaxSize>
+void Stack<T,MaxSize>::pop(){
+    assert(!elems_.empty());
+    --num_elems_;
+}
+
+template<typename T, auto MaxSize>
+const T& Stack<T,MaxSize>::top() const{
+    assert(!elems_.empty());
+    return elems_[num_elems_-1]; // return copy of last element
+}
+```
+
+通过定义
+
+```c++
+template<typename T,auto MaxSize>
+class Stack{
+    ...
+};
+```
+
+通过使用*占位符类型*(placeholder type)auto,你将MaxSize定义为一个没有指明的类型的值。它可以是任何允许作为非类型模板参数类型的类型。
+
+在类内部，你可以使用这个值：
+
+```c++
+std::array<T,MaxSize> elems_;
+```
+
+以及其类型：
+
+```c++
+using size_type = decltype(MaxSize);
+```
+
+然后，比方说，你就可以将这个类型作为一个`size()`成员方法的返回值类型：
+
+```c++
+size_type size() const{
+    return num_elems_;
+}
+```
+
+从C++14开始，你也可以直接使用auto作为返回值类型，让编译器帮你找到返回类型。
+
+```c++
+auto size() const{
+    return num_elems_;
+}
+```
+
+当使用stack时，在这个类声明中，元素数量的类型由用来记录元素数量的类型的类型决定（With this class declaration the type of the number of elements is defined by the type used for the number of elements,橙子注：绕来绕去的话，简而言之就是，记录元素数量的类型由用户使用时传入的值的类型决定。用例子说明就是，`size_type`是用户在声明`Stack<int,22>`时，由这个`22`决定的。）：
+
+```c++
+int main() {
+    Stack<int,20u> int20Stack;          //stack of up to 20 unsigned ints
+    Stack<std::string,40> stringStack;  //stack of up to 40 strings
+
+    //manipulate stack of up to 20 unsigned ints
+    int20Stack.push(7);
+    std::cout << int20Stack.top() << '\n';
+    auto size1 = int20Stack.size();
+
+    //manipulate stack of up to 40 strings
+    stringStack.push("hello");
+    std::cout << stringStack.top() << '\n';
+    auto size2 = stringStack.size();
+
+    if(!std::is_same<decltype(size1),decltype(size2)>::value){  //C++11 version
+        std::cout << "size type differ judged by C++11" << '\n';
+    }
+
+    if(!std::is_same_v<decltype(size1),decltype(size2)>){  //C++17 version
+        std::cout << "size type differ judged by C++17" << '\n';
+    }
+    return 0;
+}
+```
+
+通过
+
+```c++
+Stack<int,20u> int20Stack;
+```
+
+内部的size type就通过传递进来的20u定义成了`unsigned int`。
+
+通过
+
+```c++
+Stack<std::string,40> stringStack;
+```
+
+内部的size type就通过传递进来的40定义成了`int`。
+
+两个stack的`size()`方法返回值将会有不同的类型，在
+
+```c++
+auto size1 = int20Stack.size();
+...
+auto size2 = stringStack.size();
+```
+
+之后，size1和size2的类型是不同的。通过使用标准类型特征`std::is_same`（参考附录D3.3）和`decltype`，我们可以验证：
+
+```c++
+if(!std::is_same<decltype(size1),decltype(size2)>::value){  //C++11 version
+    std::cout << "size type differ judged by C++11" << '\n';
+}
+```
+
+对应的输出为：
+
+```shell
+size type differ judged by C++11
+```
+
+从C++17开始，对于特征返回值，你也可以直接使用后缀`_v`来跳过`::value`（参见5.6节）
+
+```c++
+if(!std::is_same_v<decltype(size1),decltype(size2)>){  //C++17 version
+    std::cout << "size type differ judged by C++17" << '\n';
+}
+```
+
+需要注意，非类型模板参数的其他限制依旧有效。尤其是3.3节讨论的非类型参数可能类型的限制。比如说：
+
+```c++
+Stack<int,3.14> sd;	//error:floatting-point nontype argument
+```
+
+同样，你也可以字符串作为常量数组传入（从C++17开始本地静态声明也可以(static locally declared)；参见3.3节），下例是可能的：
+
+```c++
+template<auto T>
+class Message{
+public:
+    void print(){
+        std::cout << T << '\n';
+    }
+};
+
+int main() {
+    Message<42> msg1;
+    msg1.print();
+
+    static const char s[] = "hello";
+    Message<s> msg2;
+    msg2.print();
+
+    return 0;
+}
+```
+
+注意，`template<decltype(auto) N>`也有可能，这允许N以引用的形式实例化：
+
+```c++
+template<decltype(auto) N>
+class T{
+    ...
+};
+
+int i;
+T<(i)> x; //N is int&
+```
+
+细节将在15.10.1小节介绍
+
+#### 3.5 总结
+
++ 模板不仅仅可以以类型作为参数，也可以以值作为参数
++ 不能使用浮点类型或者类对象作为非类型模板参数。对于字符串常量的指针/引用，临时变量，子对象，该限制同样适用。
++ 适用`auto`使模板拥有可以以一般类型作为非类型模板参数。
+
+### 第四章：可变参数模板
+
