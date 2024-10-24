@@ -1979,4 +1979,191 @@ writer_ = publiser_->create_datawriter(topic_,writer_qos);
 两种可能值：
 
 + `SHARED_OWNERSHIP_QOS`：该选项表明服务并不强制要求每个实例拥有唯一的所有权。这种情况下，对于同一数据实例，可以有多个DataWriter进行更新，并且所有更新对于现存的DataReader都是有效的。这些更新也受制于*基于时间过滤策略*（TimeBasedFilterQosPolicy）或者*历史策略*（HistoryQosPolicy）来进行过滤
-+ `EXCLUSIVE_OWNERSHIP_QOS`：
++ `EXCLUSIVE_OWNERSHIP_QOS`：该选项表明每个实例只能被一个DataWriter更新，意味着在任何时间点，只有一个DataWriter拥有这个实例，且只有该DataWriter的修改对现存DataReader可见。拥有者可以根据存活的DataWriter中最高*强度*(strength)且没有违反相关实例的截止日期合同而进行改变( The owner can be changed dynamically according to the highest strength between the alive DataWriters, which has not violated the deadline contract concerning the data instances)。*强度*(strength)可以通过*所有权强度策略*（OwnershipStrengthQosPolicy）进行改变。为了防止两个DataWriter有相同的*强度*值，拥有更小GUID值的DataWriter将会是话题的拥有者。
+
+**兼容性原则**
+为了保持DataReaders和DataWriters之间*所有权策略*（OwnershipQosPolicy）的兼容性，DataWriter的种类必须等于DataReader的种类。
+
+可能的组合：
+
+| DataWriter种类            | DataReader种类            | 兼容性 |
+| ------------------------- | ------------------------- | ------ |
+| `SHARED_OWNERSHIP_QOS`    | `SHARED_OWNERSHIP_QOS`    | 是     |
+| `SHARED_OWNERSHIP_QOS`    | `EXCLUSIVE_OWNERSHIP_QOS` | 否     |
+| `EXCLUSIVE_OWNERSHIP_QOS` | `SHARED_OWNERSHIP_QOS`    | 否     |
+| `EXCLUSIVE_OWNERSHIP_QOS` | `EXCLUSIVE_OWNERSHIP_QOS` | 是     |
+
+**示例**
+
+```c++
+// 该实例使用DataWriter，但是也适用于DataReader以及Topic实体
+DataWriterQos writer_qos;
+// 所有权策略默认以kind = SHARED构造
+// 将其改为EXCLUSIVE
+writer_qos.ownership().kind = EXCLUSIVE_OWNERSHIP_QOS;
+// 通过修改过的策略创建对应的实体
+writer_ = publisher_->create_datawriter(topic_,writer_qos);
+```
+
+```xml
+<data_writer profile_name="writer_xml_conf_ownership_profile">
+    <qos>
+      <ownership>
+	    <kind>EXCLUSIVE</kind>
+      </ownership>
+    </qos>
+</data_writer>
+
+<data_reader profile_name="reader_xml_conf_ownership_profile">
+    <qos>
+        <ownership>
+	    <kind>EXCLUSIVE</kind>
+        </ownership>
+    </qos>
+</data_reader>
+```
+
+##### 3.1.2.1.12 所有权强度策略（OwnershipStrengthQosPolicy）
+
+该策略指明了用来在多个DataWriter尝试修改相同的数据实例时用来决断的*强度*值。仅适用于*所有权策略*(OwnershipQosPolicy)的种类设置为`EXCLUSIVE_OWNERSHIP_QOS`
+
+策略数据成员：
+
+| 数据成员名 | 类型       | 默认值 |
+| ---------- | ---------- | ------ |
+| `value`    | `uint32_t` | 0      |
+
+> 提示
+>
+> 该策略适用于DataWriter实体
+>
+> 该策略可以在已激活实体上更改
+
+**示例**
+
+```c++
+// 该实例仅适用于DataWriter实体
+DataWriterQos writer_qos;
+// 所有权强度策略默认以0值创建
+// 将强度改为10
+writer_qos.ownership_strength().value = 10;
+// 通过修改过的策略创建对应DataWriter
+writer_ = publisher_->create_datawriter(topic_,writer_qos);
+```
+
+```xml
+<data_writer profile_name="writer_xml_conf_ownership_strength_profile">
+    <qos>
+        <ownershipStrength>
+	    <value>10</value>
+        </ownershipStrength>
+    </qos>
+</data_writer>
+```
+
+##### 3.1.2.1.13 分区策略（PartitionQosPolicy）
+
+该策略允许在*域*中引入的物理分区中引入逻辑分区。DataReader要读取DataWriter制作的改变，不仅需要Topic匹配，它们也必须在至少一个逻辑分区中
+
+空字符串也被视为一个有效的分区，并且空字符串和其他分区名使用相同的字符串匹配以及正则表达式匹配规则。
+
+策略数据成员：
+
+| 数据成员名 | 类型                  | 默认值        |
+| ---------- | --------------------- | ------------- |
+| `max_size` | `uint32_t`            | 0（长度不限） |
+| `names`    | `SerializedPayload_t` | 空列表        |
+
++ `max_size`：分区名列表的最大长度
++ `names`：分区名的列表
+
+> 提示
+>
+> 该策略适用于Publisher和Subscriber实体
+>
+> 分区也可以在*端点*(endpoint)层级中定义来覆盖这个配置。具体做法在12.1.4小节
+>
+> 该策略可以在已激活的实体上更改
+
+**示例**
+
+```c++
+//该实例使用Publisher，但是也同样使用Subscriber
+PublisherQos publisher_qos;
+//分区策略默认以max_size = 0创建
+//max_size是一个私有成员，所以需要通过setter以及getter进行访问
+//将max_size设置为20
+publisher_qos.partition().set_max_size(20);//setter
+//分区策略默认以空列表创建
+//partitions是一个私有成员，所以需要通过setter以及getter进行访问
+
+// 初始化一个新的分区列表
+std::vector<std::string> part;
+part.push_back("part1");
+part.push_back("part2");
+publisher_qos.partition().names(part);//setter
+//通过修改过的策略创建对应的实体
+publisher_ = participant_->create_publisher(publisher_qos);
+
+//在运行时添加新分区
+part = publisher_qos.partition().names(); //getter，保存旧值
+part.push_back("part3");
+publisher_qos.partition().names(part);//setter
+//在对应实体中更新策略
+publisher_->set_qos(publisher_qos);
+```
+
+```xml
+<data_writer profile_name="pub_partition_example">
+    <qos>
+        <partition>
+            <names>
+                <name>part1</name>
+                <name>part2</name>
+            </names>
+        </partition>
+    </qos>
+</data_writer>
+
+<data_reader profile_name="sub_partition_example">
+    <qos>
+        <partition>
+            <names>
+                <name>part1</name>
+                <name>part2</name>
+            </names>
+        </partition>
+    </qos>
+</data_reader>
+```
+
+##### 3.1.2.1.14 演示策略（PresentationQosPolicy）
+
+> 警告
+>
+> 该策略将在未来版本中实现
+
+该策略指明表示数据实例变化的样本如何展现给订阅程序。它控制了数据实例之间的变化可以相互依赖的程度，以及可以传播和维护的依赖类型。（This QoS Policy specifies how the samples representing changes to data instances are presented to the subscribing application. It controls the extent to which changes to data instances can be made dependent on each other, as well as the kind of dependencies that can be propagated and maintained.）
+
+策略数据成员
+
+| 数据成员名        | 类型                                 | 默认值                      |
+| ----------------- | ------------------------------------ | --------------------------- |
+| `access_scope`    | PresentationQosPolicyAccessScopeKind | `INSTANCE_PRESENTATION_QOS` |
+| `coherent_access` | `bool`                               | `false`                     |
+| `ordered_access`  | `bool`                               | `false`                     |
+
++ `access_scope`:决定顺序以及一致性在跨实体时可以保存的最大范围
++ `coherent_access`：控制服务是否将发布方的改变分组，以便在接收方以一个单元进行接收
++ `ordered_access`：控制服务是否支持 订阅者看到的变化和发布方发生的改变的顺序一致 的能力
+
+> 提示
+>
+> 该策略适用于Publisher和Subscriber实体
+>
+> 该策略**不**能在已激活的实体上改变
+
+> 警告
+>
+> 为了DataWriter和DataReader匹配，必须遵守兼容性原则
+
