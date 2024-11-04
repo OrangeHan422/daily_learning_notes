@@ -1711,3 +1711,51 @@ BCC支持使用C语言编写底层BPF控制程序，然后使用Python或者其�
 
 ### 4.11 BCC的内部实现
 
+BCC由以下几部分组成：
+
++ 一个C++前端API，用于内核态的BPF程序的编制，包括:
+  - 一个预处理宏，负责将内存引用转换为bpf_probe_read()函数调用（可能也包括其变体）
++ 一个C++后端驱动：
+  - 使用Clang/LLVM编译BPF程序
+  - 将BPF程序装载到内核中。
+  - 将BPF程序挂载到事件上。
+  - 对BPF映射表进行读/写
++ 用于编写BCC工具的语言前端：Python、C++和Lua
+
+实现如图：
+
+![image-20241028091932587](./images/image-20241028091932587.png)
+
+图中的BPF、Table和USDT Python对象，是它们在libbcc和libbcc_bpf库中对应实现的封装。使用Table对象与BPF映射表数据结构进行交互，映射表中的数据也可以直接从BPF对象内部获得，下面这两行代码是等价的：
+
+```python
+counts = b.get_table("counts")
+counts = b["counts"]
+```
+
+USDT是Python中的一个独立的对象，因为它的行为和kprobes、uprobes、跟踪点都不一样。在初始化阶段，它必须被挂载到一个进程的ID或者路径上。和其他事件类型不同，有些USDT需要再进程映像中设定信号量来激活。应用程序使用这些信号量来决定USDT当前是否在使用中，是否需要为其准备参数，后者它是否可以作为性能优化从而被略过。
+
+C++组件被编译为libbcc_bpf和libbcc，它们也可以被其他软件所使用（比如bpftrace）。libbcc_bpf来自Linux内核源代码，位于`tools/lib/bpf`
+
+BCC装载一个BPF程序并开始对某个事件进行插桩的步骤如下：
+
++ 创建Python BPF对象，将BPF C程序传递给该BPF对象
++ 使用BCC改写器对BPF C程序进行预处理，经内存访问替换为bpf_probe_read()调用。
++ 使用Clang将BPF C程序编译为LLVM IR
++ 使用BCC codegen根据需要增加额外的LLVM IR
++ LLVM将IR编译为BPF字节码
++ 如果用到了映射表，就创建这些映射表
++ 字节码被传送到内核，并经过BPF验证器的检查
++ 事件被启用，BPF程序被挂载到事件上。
++ BCC程序通过映射表或者perf_event缓冲区读取数据。
+
+### 4.12 BCC的调试
+
+BCC的调试可以通过打印语句、BCC调试模式、bpflist以及重置事件等方式。其他常见问题见18章。
+
+下图显示程序编译的流程和各个环节中可以使用的调试工具。
+
+![image-20241029091704288](./images/image-20241029091704288.png)
+
+#### 4.12.1 printf()调试
+

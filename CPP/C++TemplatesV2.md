@@ -1686,3 +1686,54 @@ void print(T first_arg,Types... args){
 }
 ```
 
+如果传递一个或者多个参数，就会使用到这个模板函数（在递归调用输出剩余参数之前输出单独声明的第一个参数）。剩余名为args的参数是一个*函数参数包*（function parameter pack）:
+
+```c++
+void print(T firstArg,Types... args)
+```
+
+使用"Types"定义一个*模板参数包*(template parameter pack)：
+
+```c++
+template<typename T,typename... Types>
+```
+
+定义了一个非模板重载的`print()`，当参数为空的时候调用来结束递归。
+
+举个例子，以下调用：
+
+```c++
+std::string s("world");
+print(7.5,"hello",s);
+```
+
+输出：
+
+```shell
+7.5
+hello
+world
+```
+
+第一次调用相当于：
+
+```c++
+print<double,const char*,std::string> (7.5,"hello",s);
+```
+
+其中：
+
++ `firstArg`值为7.5，所以类型T就是`double`
++ `args`是可变模板参数，包括`const char*`类型的`"hello"`以及`std::string`类型的`"world"`
+
+在`firstArg`以7.5输出后，将使用剩下的参数再次调用`print()`，相当于：
+
+```c++
+print<const char*,std::string>("hello",s);
+```
+
+其中：
+
++ `firstArg`值为`"hello"`，所以类型T就是`const char*`
++ `args`是可变模板参数，包括`std::string`类型的`"world"`
+

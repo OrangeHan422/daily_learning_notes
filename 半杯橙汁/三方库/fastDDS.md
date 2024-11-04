@@ -2167,3 +2167,29 @@ publisher_->set_qos(publisher_qos);
 >
 > 为了DataWriter和DataReader匹配，必须遵守兼容性原则
 
+**演示策略访问范围类型（PresentationQosPolicyAccessScopeKind）**
+
+三种不同的值会根据`coherent_access`和`ordered_access`变量值有不同的行为：
+
++ `INSTANCE_PRESENTATION_QOS`：对于数据实例的改变，不需要和任何其他实例保持一致或者保持顺序，这就意味着，顺序性或者一致性对于每个实例单独生效。
+  + 激活`coherent_access`的情况下，
+
+
+
+
+
+# GitHub示例
+
+## HelloWorld
+
+### 示例描述
+
+每个实例程序（发布者和订阅者）创建了不同的嵌套DDS实体：域成员，发布者，DataWriter（发布者程序）；域成员，订阅者，DataReader（订阅者程序）。两个实例中，DDS实体都从环境中读取默认配置。如果环境没有指定配置，每个实体将使用默认配置。关于环境配置的更多信息，参考*XML文件*小节
+
+该实例中包含两种订阅范式；监听回调以及wait-set:
+
++ 监听回调机制会声明一个监听者类依附于DataReader。当DataReader被事件触发时，它将运行与实践对应的监听者成员方法（以回调形式执行）。以该实例来讲，订阅者类继承自监听者类，并重写了对应的回调函数。
++ wait-set机制会有一个专门的线程一直等待到状态条件触发。此时，状态条件触发的事件会用来评估采取哪个具体动作来处理。(类似epoll，该机制会记录触发的事件，wait-set类成员方法wait似epoll_wait,会将就绪的事件存储在ConditionSeq中)
+
+在该示例中，监听者程序以及wait-set程序对于触发事件都会运行相同的代码，生成相同的输出：订阅匹配以及可用新数据
+
