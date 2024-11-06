@@ -1375,9 +1375,9 @@ eProsima Fast DDS 提供了两套不同的API来提供不同级别的通信。�
 
 每个DDS实体都有一组特定的QoS策略，该策略可以是标准QoS策略、XTypes扩展和eProsima扩展的混合策略。
 
-#### 3.1.2.1 标准QoS策略
+##### 3.1.2.1 标准QoS策略
 
-##### 3.1.2.1.1 限期QoS策略(DeadlineQosPolicy)
+###### 3.1.2.1.1 限期QoS策略(DeadlineQosPolicy)
 
 当新样本的频率低于特定频率时，该策略会发出警告。适用于数据需要周期性的更新这种情况。（参考19.1.1.7.5小节）
 
@@ -1442,7 +1442,7 @@ writer_ = publisher_->create_datawriter(topic_,writer_qos);
 </data_reader>
 ```
 
-##### 3.1.2.1.2 目的地顺序QoS策略(DestinationOrderQoSPolicy)
+###### 3.1.2.1.2 目的地顺序QoS策略(DestinationOrderQoSPolicy)
 
 > 警告：
 >
@@ -1490,7 +1490,7 @@ QoS策略数据成员如下：
 | `BY_SOURCE_TIMESTAMP_DESTINATIONORDER_QOS`    | `BY_RECEPTION_TIMESTAMP_DESTINATIONORDER_QOS` | 是     |
 | `BY_SOURCE_TIMESTAMP_DESTINATIONORDER_QOS`    | `BY_SOURCE_TIMESTAMP_DESTINATIONORDER_QOS`    | 是     |
 
-##### 3.1.2.1.3 持续策略（DurabilityQosPolicy）
+###### 3.1.2.1.3 持续策略（DurabilityQosPolicy）
 
 即使没有DataReader，DataWriter也可以通过话题发送消息。此外，DataReader也可以在话题已经被写入了一些数据时加入话题，并对感兴趣的信息进行访问（参考19.1.1.7.9）
 
@@ -1575,7 +1575,7 @@ writer_ = publisher_->create_datawriter(topic_,writer_qos);
 </data_reader>
 ```
 
-##### 3.1.2.1.4 持久服务策略（DurabilityServiceQosPolicy）
+###### 3.1.2.1.4 持久服务策略（DurabilityServiceQosPolicy）
 
 > 警告
 >
@@ -1612,7 +1612,7 @@ writer_ = publisher_->create_datawriter(topic_,writer_qos);
 >
 > 该策略**不**能在已激活实体上改变
 
-##### 3.1.2.1.5 实体工厂策略(EntityFactoryQosPolicy)
+###### 3.1.2.1.5 实体工厂策略(EntityFactoryQosPolicy)
 
 该策略控制作为其他实体的工厂的实体的行为。默认情况下，所有的实体都是以激活(enabled)方式创建的，但是如果你将`autoenable_created_entities`设置为`false`，新的实体将会以非激活方式(disalbed)创建。
 
@@ -1641,7 +1641,7 @@ participant_ = factory_->create_participant(domain,participant_qos);
 
 > 该策略暂时不能以XML形式配置
 
-##### 3.1.2.1.6 组数据策略(GroupDataQosPolicy)
+###### 3.1.2.1.6 组数据策略(GroupDataQosPolicy)
 
 允许用户在创建Publisher或者Subscriber时添加附带信息。该数据对Publisher/Subscriber拥有的所有DataWriter/DataReader都一样，该数据通过内置的话题进行传播。
 
@@ -1705,7 +1705,7 @@ publiser_->set_qos(publisher_qos);
 </data_reader>
 ```
 
-##### 3.1.2.1.7 历史策略(HistoryQosPolicy)
+###### 3.1.2.1.7 历史策略(HistoryQosPolicy)
 
 该策略控制在成功和已经存在的DataReader实体进行通信前实例的数据发生了一次或多次变化时系统的行为。
 
@@ -1772,7 +1772,7 @@ HistoryQos必须和*资源限制策略*（ResourceLimitsQosPolicy）、*持久�
   </topic>
   ```
 
-##### 3.1.2.1.8 延迟预算策略（LatencyBudgetQosPolicy）
+###### 3.1.2.1.8 延迟预算策略（LatencyBudgetQosPolicy）
 
   > 注意：
   >
@@ -1800,7 +1800,7 @@ HistoryQos必须和*资源限制策略*（ResourceLimitsQosPolicy）、*持久�
 
   为了保持DataReaders和DataWriters之间*延迟预算策略*（LatencyBudgetQosPolicy）的兼容性，DataWriter的延迟必须小于等于DataReader的延时（简言之就是读数据的时候一定要有已经写了的数据）。
 
-##### 3.1.2.1.9 寿命策略（LifespanQosPolicy）
+###### 3.1.2.1.9 寿命策略（LifespanQosPolicy）
 
   每个DataWriter写入的数据样本都有一个与之关联的过期时间，超过该时间，数据将会从DataWriter和DataReader的瞬息或者持久信息缓存(transient and persistent information caches)中清除。
 
@@ -1854,7 +1854,7 @@ writer_ = publisher_->create_datawriter(topic_,writer_qos);
 </data_reader>
 ```
 
-##### 3.1.2.1.10 存活策略（LivelinessQosPolicy）
+###### 3.1.2.1.10 存活策略（LivelinessQosPolicy）
 
 该策略是服务用来确认网络上的特定实体仍然存活的机制。有不同的设置允许区分定期更新数据的应用程序和偶尔更新数据的应用程序。也可以通过该活力策略定制哪些类型的失败需要被检测到。
 
@@ -1954,7 +1954,7 @@ writer_ = publiser_->create_datawriter(topic_,writer_qos);
 </data_reader>
 ```
 
-##### 3.1.2.1.11 所有权策略（OwnershipQosPolicy）
+###### 3.1.2.1.11 所有权策略（OwnershipQosPolicy）
 
 该策略指明多个DataWriter是否可以对同一数据的实例进行更新，如果可以，这写修改改如何决断。
 
@@ -2023,7 +2023,7 @@ writer_ = publisher_->create_datawriter(topic_,writer_qos);
 </data_reader>
 ```
 
-##### 3.1.2.1.12 所有权强度策略（OwnershipStrengthQosPolicy）
+###### 3.1.2.1.12 所有权强度策略（OwnershipStrengthQosPolicy）
 
 该策略指明了用来在多个DataWriter尝试修改相同的数据实例时用来决断的*强度*值。仅适用于*所有权策略*(OwnershipQosPolicy)的种类设置为`EXCLUSIVE_OWNERSHIP_QOS`
 
@@ -2061,7 +2061,7 @@ writer_ = publisher_->create_datawriter(topic_,writer_qos);
 </data_writer>
 ```
 
-##### 3.1.2.1.13 分区策略（PartitionQosPolicy）
+###### 3.1.2.1.13 分区策略（PartitionQosPolicy）
 
 该策略允许在*域*中引入的物理分区中引入逻辑分区。DataReader要读取DataWriter制作的改变，不仅需要Topic匹配，它们也必须在至少一个逻辑分区中
 
@@ -2137,7 +2137,7 @@ publisher_->set_qos(publisher_qos);
 </data_reader>
 ```
 
-##### 3.1.2.1.14 演示策略（PresentationQosPolicy）
+###### 3.1.2.1.14 演示策略（PresentationQosPolicy）
 
 > 警告
 >
@@ -2173,6 +2173,208 @@ publisher_->set_qos(publisher_qos);
 
 + `INSTANCE_PRESENTATION_QOS`：对于数据实例的改变，不需要和任何其他实例保持一致或者保持顺序，这就意味着，顺序性或者一致性对于每个实例单独生效。
   + 激活`coherent_access`的情况下，
+
+> TODO 策略过多，一刷暂不继续翻译，二刷补齐
+
+
+
+#### 3.1.3 状态(Status)
+
+每个实体都有一个`status`对象集合，其值代表该实体的通信状态。当相关实体的通信事件发生时，status值会发生改变。比如新数据到达时、发现了新的成员时或者对端丢失。状态被分为几个status对象，每个对象关心通信的不同方面，这样每个状态对象的变化都独立于其他对象。
+
+status对象的每个改变会触发对应的监听者(Listener)的回调函数，应用程序因此获得通知。对于一个名为`fooStatus`的status对象，当状态发生改变时，listener实体实现的回调函数`on_foo()`将会被调用。注意有些状态的数据成员会在每次对应listener被调用之后重置。改规则的唯一例外就是实体没有依附的listener，也就不可能有回调被调用。各种Status详细信息参考文档。
+
+条件和等待集(Conditions and Wait-sets)通过*状态条件*(StatusCondition)为发现状态对象的改变提供了可选择的机制。该机制的优点是，应用程序可以在几个实体上同时等待改变。它也会帮助你的系统进行决策，因为在内部线程中通知还没有像listener那样被处理。（橙子注：可以通过官方示例理解，wait-set和listener实际上是触发事件的两种处理方式）
+
+实体通过函数提供访问其status的入口。如果一个status名为`fooStatus`，实体会提供一个`get_foo()`函数用来提供访问`fooStatus`内的数据。唯一的例外是DataOnReaders和DataAvailiable。这些getter函数将返回一个只读对象，其所有的数据成员在应用程序内都是public的。注意一些status的数据成员会在应用程序每次调用getter函数后重置。各种Status详细信息参考文档。
+
+status对象概览
+
+| 状态名                         | 实体       | Listener回调                     | 访问接口                                 | 比特位 |
+| ------------------------------ | ---------- | -------------------------------- | ---------------------------------------- | ------ |
+| InconsistentTopicStatus        | Topic      | `on_inconsistent_topic()`        | `get_inconsistent_topic_status()`        | 0      |
+| OfferedDeadlineMissedStatus    | DataWriter | `on_offered_deadline_missed()`   | `get_offered_deadline_missed_status()`   | 1      |
+| RequestedDeadlineMissedStatus  | DataReader | `on_requested_deadline_missed()` | `get_requested_deadline_missed_status()` | 2      |
+| OfferedIncompatibleQosStatus   | DataWriter | `on_offered_incompatible_qos()`  | `get_offered_incompatible_qos_status()`  | 5      |
+| RequestedIncompatibleQosStatus | DataReader | on_requested_incompatible_qos()  | get_requested_incompatible_qos_status()  | 6      |
+| SampleLostStatus               | DataReader | on_sample_lost()                 | get_sample_lost_status()                 | 7      |
+| SampleRejectedStatus           | DataReader | on_sample_rejected()             | get_sample_rejected_status()             | 8      |
+| DataOnReaders                  | Subscriber | on_data_on_readers()             | N/A                                      | 9      |
+| DataAvailable                  | DataReader | on_data_available()              | N/A                                      | 10     |
+| LivelinessLostStatus           | DataWriter | on_liveliness_lost()             | get_liveliness_lost_status()             | 11     |
+| LivelinessChangedStatus        | DataReader | on_liveliness_changed()          | get_liveliness_changed_status()          | 12     |
+| PublicationMatchedStatus       | DataWriter | on_publication_matched()         | get_publication_matched_status()         | 13     |
+| SubscriptionMatchedStatus      | DataReader | on_subscription_matched()        | get_subscription_matched_status()        | 14     |
+
+> TODO 具体状态文档，待二刷翻译
+
+#### 3.1.4 条件与等待集(Condition and Wait-sets)
+
+Conditions（与wait-sets一起用）提供了一个可选机制，该机制允许中间件通知应用程序通信状态的改变（包括数据到达）
+
+该机制是基于等待的(wait-based)。一般使用模式如下（橙子注：可以联想epoll的使用模式）：
+
++ 应用程序通过将Condition对象（GuardCondition、StatusCondition或者ReadCondition）通过函数`attach_condition()`依附在Wait-set实现相关通知的获取。
++ 接下来Wait-set通过调用`wait()`进行等待，直到一个或者多个Condition对象的触发值变为true
++ 然后通过下述步骤使用`wait()`的结果（即，trigger_value为true的Condition对象列表）来获取信息：
+  - 当condition是StatusCondition并且status变化指向一个普通的通信状态时，调用`get_status_changes()`然后通过在结果上使用`StatusMask::is_active()`方法来检查哪些改变是相关的，最后在对应的实体上调用`get_<communication_status>`（原文:`get_status_changed()`,then checking if any of the changes is relevant using the `StatusMask::is_active()`method on the result and finally calling `get_<communication_status>` on the relevant Entity,when the condition is a StatusCondition and the status changes refer to plain communication status.）更多信息查看status章节
+  - 当condition是StatusCondition并且status变化指向DataOnReaders时，调用`get_status_changes()`然后在相关订阅者上调用`Subscriber::get_datareaders()`
+  - 当condition是StatusCondition并且status变化指向DataAvailable时，调用`get_status_changes()`然后在相关的DataReader上调用`DataReader::read()`或者`DataReader::take()`
+  - 当是一个ReadCondition时，直接调用`DataReader::read_w_condition()`或者`DataReader::take_w_condition()`，并将Condition作为参数
++ 当一个Condition没有任何相关性时，可以通过`detach_condition()`将其从Wait-set上分离
+
+第一步通常是在初始化阶段完成的，其他步骤则是在程序的主循环中。
+
+```c++
+class ApplicationJob
+{
+    WaitSet wait_set_;
+    GuardCondition terminate_condition_;
+    std::thread thread_;
+
+    void main_loop()
+    {
+        // 在terminate_condition_被触发之前，main_loop一直执行
+        while (false == terminate_condition_.get_trigger_value())
+        {
+            // 等待任何被触发的条件，类似epoll_wait
+            ReturnCode_t ret_code;
+            ConditionSeq triggered_conditions;
+            // triggered_conditions类似于epoll_event
+            ret_code = wait_set_.wait(triggered_conditions, eprosima::fastdds::dds::c_TimeInfinite);
+            if (RETCODE_OK != ret_code)
+            {
+                // ... handle error
+                continue;
+            }
+
+            // 处理被触发的条件
+            for (Condition* cond : triggered_conditions)
+            {
+                StatusCondition* status_cond = dynamic_cast<StatusCondition*>(cond);
+                if (nullptr != status_cond)
+                {
+                    //通过条件获取对应的实体
+                    Entity* entity = status_cond->get_entity();
+                    //获取对应实体的状态变化
+                    StatusMask changed_statuses = entity->get_status_changes();
+
+                    // Process status. Liveliness changed and data available are depicted as an example
+                    //处理变化的状态，这里用Liveliness changed 和 data available作为示例
+                    if (changed_statuses.is_active(StatusMask::liveliness_changed()))
+                    {
+                        std::cout << "Liveliness changed reported for entity " <<
+                            entity->get_instance_handle() <<
+                            std::endl;
+                    }
+				
+                    if (changed_statuses.is_active(StatusMask::data_available()))
+                    {
+                        std::cout << "Data avilable on reader " << entity->get_instance_handle() << std::endl;
+
+                        FooSeq data_seq;
+                        SampleInfoSeq info_seq;
+                        //这里为什么转化为reader，可以参见status章节的对应关系
+                        DataReader* reader = static_cast<DataReader*>(entity);
+
+                        // Process all the samples until no one is returned
+                        while (RETCODE_OK == reader->take(data_seq, info_seq,
+                                LENGTH_UNLIMITED, ANY_SAMPLE_STATE,
+                                ANY_VIEW_STATE, ANY_INSTANCE_STATE))
+                        {
+                            // Both info_seq.length() and data_seq.length() will have the number of samples returned
+                            for (FooSeq::size_type n = 0; n < info_seq.length(); ++n)
+                            {
+                                // Only samples with valid data should be accessed
+                                if (info_seq[n].valid_data &&
+                                        reader->is_sample_valid(&data_seq[n], &info_seq[n]))
+                                {
+                                    // Process sample on data_seq[n]
+                                }
+                            }
+
+                            // must return the loaned sequences when done processing
+                            reader->return_loan(data_seq, info_seq);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+public:
+	//初始化阶段，将终止条件以及所有关注的reader和writer的状态条件attach到wait_set中
+    //类似epoll_ctl(EPOLL_ADD)
+    ApplicationJob(
+            const std::vector<DataReader*>& readers,
+            const std::vector<DataWriter*>& writers)
+    {
+        // Add a GuardCondition, so we can signal the processing thread to stop
+        wait_set_.attach_condition(terminate_condition_);
+
+        // Add the status condition of every reader and writer
+        for (DataReader* reader : readers)
+        {
+            wait_set_.attach_condition(reader->get_statuscondition());
+        }
+        for (DataWriter* writer : writers)
+        {
+            wait_set_.attach_condition(writer->get_statuscondition());
+        }
+
+        thread_ = std::thread(&ApplicationJob::main_loop, this);
+    }
+
+    ~ApplicationJob()
+    {
+        // Signal the GuardCondition to force the WaitSet to wake up
+        terminate_condition_.set_trigger_value(true);
+        // Wait for the thread to finish
+        thread_.join();
+    }
+
+};
+
+// Application initialization
+ReturnCode_t ret_code;
+std::vector<DataReader*> application_readers;
+std::vector<DataWriter*> application_writers;
+
+// Create the participant, topics, readers, and writers.
+ret_code = create_dds_application(application_readers, application_writers);
+if (RETCODE_OK != ret_code)
+{
+    // ... handle error
+    return;
+}
+
+{
+    ApplicationJob main_loop_thread(application_readers, application_writers);
+
+    // ... wait for application termination signaling (signal handler, user input, etc)
+
+    // ... Destructor of ApplicationJob takes care of stopping the processing thread
+}
+
+// Destroy readers, writers, topics, and participant
+destroy_dds_application();
+```
+
+在Wait-set调用`wait()`，如果所有依附的条件触发值都为false，那么该线程会阻塞。任何依附条件的触发值变为true时，`wait()`返回RETCODE_OK，线程将被唤醒。
+
+##### 3.1.4.1 GuardCondition
+
+该条件完全由应用程序通过`set_triggered_value()`操作来控制
+
+##### 3.1.4.2 StatusCondition
+
+任何实体的通信状态发生变化时触发。
+
+StatusCondition对于特定通信状态的敏感性是通过`set_enabled_statuses()`操作在该condition上设置enabled_statuses set控制的。（原文：The sensitivity of the StatusCondition to a particular communication status is controlled by the list of enabled_statuses set on the condition by means of the set_enabled_statuses() operation.）
+
+##### 3.1.4.3 ReadCondition
+
+只要创建该condition的DataReader至少包含了一个SampleState、ViewState和InstanceState与这些ReadCondition匹配的样本就会触发（原文：A condition that triggers whenever the DataReader that created it contains at least a sample with SampleState, ViewState, and InstanceState matching those of the ReadCondition.）
 
 
 
