@@ -8,4 +8,4 @@
 >
 > Do one thing and do it well
 >
-> 想要天亮进程，就要天黑赶路
+> 想要天亮进城，就要天黑赶路
